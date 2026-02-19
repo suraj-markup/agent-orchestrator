@@ -40,7 +40,7 @@ pnpm build
 cd packages/web
 pnpm dev
 
-# Open http://localhost:3000
+# Open http://localhost:3000 (or your configured port)
 ```
 
 ### Project Structure
@@ -328,12 +328,12 @@ curl http://localhost:3000/api/sessions/my-app-3
 
 ```bash
 # Terminal server ports (for web dashboard)
-TERMINAL_PORT=3001
-DIRECT_TERMINAL_PORT=3003
+TERMINAL_PORT=14800
+DIRECT_TERMINAL_PORT=14801
 
 # Next.js
-NEXT_PUBLIC_TERMINAL_PORT=3001
-NEXT_PUBLIC_DIRECT_TERMINAL_PORT=3003
+NEXT_PUBLIC_TERMINAL_PORT=14800
+NEXT_PUBLIC_DIRECT_TERMINAL_PORT=14801
 ```
 
 ### User Secrets

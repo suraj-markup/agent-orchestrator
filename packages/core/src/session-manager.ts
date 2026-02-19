@@ -15,6 +15,10 @@ import { statSync, existsSync, readdirSync, writeFileSync, mkdirSync } from "nod
 import { join } from "node:path";
 import {
   isIssueNotFoundError,
+  isRestorable,
+  NON_RESTORABLE_STATUSES,
+  SessionNotRestorableError,
+  WorkspaceMissingError,
   type SessionManager,
   type Session,
   type SessionId,
@@ -36,13 +40,21 @@ import {
 } from "./types.js";
 import {
   readMetadataRaw,
+  readArchivedMetadataRaw,
   writeMetadata,
+  updateMetadata,
   deleteMetadata,
   listMetadata,
   reserveSessionId,
 } from "./metadata.js";
 import { buildPrompt } from "./prompt-builder.js";
-import { getSessionsDir, getProjectBaseDir, generateTmuxName, generateConfigHash, validateAndStoreOrigin } from "./paths.js";
+import {
+  getSessionsDir,
+  getProjectBaseDir,
+  generateTmuxName,
+  generateConfigHash,
+  validateAndStoreOrigin,
+} from "./paths.js";
 
 /** Escape regex metacharacters in a string. */
 function escapeRegex(str: string): string {
@@ -266,10 +278,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     // external scripts (which don't store runtimeHandle) to always show "unknown".
     if (plugins.agent) {
       try {
-        const detected = await plugins.agent.getActivityState(
-          session,
-          config.readyThresholdMs,
-        );
+        const detected = await plugins.agent.getActivityState(session, config.readyThresholdMs);
         if (detected !== null) {
           session.activity = detected;
         }
@@ -762,7 +771,10 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     deleteMetadata(sessionsDir, sessionId, true);
   }
 
-  async function cleanup(projectId?: string, options?: { dryRun?: boolean }): Promise<CleanupResult> {
+  async function cleanup(
+    projectId?: string,
+    options?: { dryRun?: boolean },
+  ): Promise<CleanupResult> {
     const result: CleanupResult = { killed: [], skipped: [], errors: [] };
     const sessions = await list(projectId);
 
@@ -869,5 +881,194 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     await runtimePlugin.sendMessage(handle, message);
   }
 
-  return { spawn, spawnOrchestrator, list, get, kill, cleanup, send };
+  async function restore(sessionId: SessionId): Promise<Session> {
+    // 1. Find session metadata across all projects (active first, then archive)
+    let raw: Record<string, string> | null = null;
+    let sessionsDir: string | null = null;
+    let project: ProjectConfig | undefined;
+    let projectId: string | undefined;
+    let fromArchive = false;
+
+    for (const [key, proj] of Object.entries(config.projects)) {
+      const dir = getProjectSessionsDir(proj);
+      const metadata = readMetadataRaw(dir, sessionId);
+      if (metadata) {
+        raw = metadata;
+        sessionsDir = dir;
+        project = proj;
+        projectId = key;
+        break;
+      }
+    }
+
+    // Fall back to archived metadata (killed/cleaned sessions)
+    if (!raw) {
+      for (const [key, proj] of Object.entries(config.projects)) {
+        const dir = getProjectSessionsDir(proj);
+        const archived = readArchivedMetadataRaw(dir, sessionId);
+        if (archived) {
+          raw = archived;
+          sessionsDir = dir;
+          project = proj;
+          projectId = key;
+          fromArchive = true;
+          break;
+        }
+      }
+    }
+
+    if (!raw || !sessionsDir || !project || !projectId) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    // If restored from archive, recreate the active metadata file
+    if (fromArchive) {
+      writeMetadata(sessionsDir, sessionId, {
+        worktree: raw["worktree"] ?? "",
+        branch: raw["branch"] ?? "",
+        status: raw["status"] ?? "killed",
+        tmuxName: raw["tmuxName"],
+        issue: raw["issue"],
+        pr: raw["pr"],
+        summary: raw["summary"],
+        project: raw["project"],
+        createdAt: raw["createdAt"],
+        runtimeHandle: raw["runtimeHandle"],
+      });
+    }
+
+    // 2. Reconstruct Session from metadata and enrich with live runtime state.
+    //    metadataToSession sets activity: null, so without enrichment a crashed
+    //    session (status "working", agent exited) would not be detected as terminal
+    //    and isRestorable would reject it.
+    const session = metadataToSession(sessionId, raw);
+    const plugins = resolvePlugins(project);
+    await enrichSessionWithRuntimeState(session, plugins, true);
+
+    // 3. Validate restorability
+    if (!isRestorable(session)) {
+      if (NON_RESTORABLE_STATUSES.has(session.status)) {
+        throw new SessionNotRestorableError(sessionId, `status is "${session.status}"`);
+      }
+      throw new SessionNotRestorableError(sessionId, "session is not in a terminal state");
+    }
+
+    // 4. Validate required plugins (plugins already resolved above for enrichment)
+    if (!plugins.runtime) {
+      throw new Error(`Runtime plugin '${project.runtime ?? config.defaults.runtime}' not found`);
+    }
+    if (!plugins.agent) {
+      throw new Error(`Agent plugin '${project.agent ?? config.defaults.agent}' not found`);
+    }
+
+    // 5. Check workspace
+    const workspacePath = raw["worktree"] || project.path;
+    const workspaceExists = plugins.workspace?.exists
+      ? await plugins.workspace.exists(workspacePath)
+      : existsSync(workspacePath);
+
+    if (!workspaceExists) {
+      // Try to restore workspace if plugin supports it
+      if (!plugins.workspace?.restore) {
+        throw new WorkspaceMissingError(workspacePath, "workspace plugin does not support restore");
+      }
+      if (!session.branch) {
+        throw new WorkspaceMissingError(workspacePath, "branch metadata is missing");
+      }
+      try {
+        const wsInfo = await plugins.workspace.restore(
+          {
+            projectId,
+            project,
+            sessionId,
+            branch: session.branch,
+          },
+          workspacePath,
+        );
+
+        // Run post-create hooks on restored workspace
+        if (plugins.workspace.postCreate) {
+          await plugins.workspace.postCreate(wsInfo, project);
+        }
+      } catch (err) {
+        throw new WorkspaceMissingError(
+          workspacePath,
+          `restore failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // 6. Destroy old runtime if still alive (e.g. tmux session survives agent crash)
+    if (session.runtimeHandle) {
+      try {
+        await plugins.runtime.destroy(session.runtimeHandle);
+      } catch {
+        // Best effort — may already be gone
+      }
+    }
+
+    // 7. Get launch command — try restore command first, fall back to fresh launch
+    let launchCommand: string;
+    const agentLaunchConfig = {
+      sessionId,
+      projectConfig: project,
+      issueId: session.issueId ?? undefined,
+      permissions: project.agentConfig?.permissions,
+      model: project.agentConfig?.model,
+    };
+
+    if (plugins.agent.getRestoreCommand) {
+      const restoreCmd = await plugins.agent.getRestoreCommand(session, project);
+      launchCommand = restoreCmd ?? plugins.agent.getLaunchCommand(agentLaunchConfig);
+    } else {
+      launchCommand = plugins.agent.getLaunchCommand(agentLaunchConfig);
+    }
+
+    const environment = plugins.agent.getEnvironment(agentLaunchConfig);
+
+    // 8. Create runtime (reuse tmuxName from metadata)
+    const tmuxName = raw["tmuxName"];
+    const handle = await plugins.runtime.create({
+      sessionId: tmuxName ?? sessionId,
+      workspacePath,
+      launchCommand,
+      environment: {
+        ...environment,
+        AO_SESSION: sessionId,
+        AO_DATA_DIR: sessionsDir,
+        AO_SESSION_NAME: sessionId,
+        ...(tmuxName && { AO_TMUX_NAME: tmuxName }),
+      },
+    });
+
+    // 9. Update metadata — merge updates, preserving existing fields
+    const now = new Date().toISOString();
+    updateMetadata(sessionsDir, sessionId, {
+      status: "spawning",
+      runtimeHandle: JSON.stringify(handle),
+      restoredAt: now,
+    });
+
+    // 10. Run postLaunchSetup (non-fatal)
+    const restoredSession: Session = {
+      ...session,
+      status: "spawning",
+      activity: "active",
+      workspacePath,
+      runtimeHandle: handle,
+      restoredAt: new Date(now),
+    };
+
+    if (plugins.agent.postLaunchSetup) {
+      try {
+        await plugins.agent.postLaunchSetup(restoredSession);
+      } catch {
+        // Non-fatal — session is already running
+      }
+    }
+
+    return restoredSession;
+  }
+
+  return { spawn, spawnOrchestrator, restore, list, get, kill, cleanup, send };
 }

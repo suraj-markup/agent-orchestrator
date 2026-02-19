@@ -28,6 +28,7 @@ cd $HOME\your-project && ao init --auto && ao start
 
 Dashboard opens at http://localhost:3000
 
+
 ## Overview
 
 Agent Orchestrator manages multiple AI coding agents working in parallel on your repository. Each agent operates in isolation using separate git worktrees, handles its own pull request lifecycle, and automatically responds to CI failures and review comments.
@@ -144,7 +145,7 @@ ao spawn my-project
 # Command-line dashboard
 ao status
 
-# Web dashboard
+# Web dashboard (default port 3000, configurable in agent-orchestrator.yaml)
 open http://localhost:3000
 ```
 
@@ -187,7 +188,7 @@ reactions:
 Basic configuration in `agent-orchestrator.yaml`:
 
 ```yaml
-port: 3000
+port: 3000  # Dashboard port (each project needs a unique port if running multiple)
 
 defaults:
   runtime: tmux
@@ -259,7 +260,7 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
 **Common issues:**
 
 - Terminal not working → node-pty rebuild (automatic via postinstall hook)
-- Port in use → Kill existing server or change port in config
+- Port in use → Change `port:` in config or kill existing server (`lsof -ti:3000 | xargs kill`)
 - Config not found → Run `ao init` from your project directory
 
 ## Contributing

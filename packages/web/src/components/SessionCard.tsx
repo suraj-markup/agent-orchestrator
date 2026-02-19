@@ -1,9 +1,17 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { type DashboardSession, type AttentionLevel, getAttentionLevel } from "@/lib/types";
+import {
+  type DashboardSession,
+  type AttentionLevel,
+  getAttentionLevel,
+  TERMINAL_STATUSES,
+  TERMINAL_ACTIVITIES,
+} from "@/lib/types";
 import { CI_STATUS } from "@composio/ao-core/types";
 import { cn } from "@/lib/cn";
+import { activityIcon } from "@/lib/activity-icons";
+import { getSessionTitle } from "@/lib/format";
 import { PRStatus } from "./PRStatus";
 import { CICheckList } from "./CIBadge";
 
@@ -14,15 +22,6 @@ interface SessionCardProps {
   onMerge?: (prNumber: number) => void;
   onRestore?: (sessionId: string) => void;
 }
-
-const activityIcon: Record<string, string> = {
-  active: "\u26A1",
-  ready: "\uD83D\uDFE2",
-  idle: "\uD83D\uDCA4",
-  waiting_input: "\u2753",
-  blocked: "\uD83D\uDEA7",
-  exited: "\uD83D\uDC80",
-};
 
 const borderColorByLevel: Record<AttentionLevel, string> = {
   merge: "border-l-[var(--color-accent-green)]",
@@ -56,12 +55,11 @@ export function SessionCard({ session, onSend, onKill, onMerge, onRestore }: Ses
   const alerts = getAlerts(session);
   const isReadyToMerge = pr?.mergeability.mergeable && pr.state === "open";
   const isTerminal =
-    session.status === "killed" ||
-    session.status === "cleanup" ||
-    session.status === "terminated" ||
-    session.status === "done" ||
-    session.status === "merged" ||
-    session.activity === "exited";
+    TERMINAL_STATUSES.has(session.status) ||
+    (session.activity !== null && TERMINAL_ACTIVITIES.has(session.activity));
+  // UI restore button: more permissive than core isRestorable() — shows restore
+  // when agent has exited even if status is "working" (agent crashed mid-work).
+  // Only block "merged" (server-side restore will reject anyway).
   const isRestorable = isTerminal && session.status !== "merged";
 
   return (
@@ -93,7 +91,7 @@ export function SessionCard({ session, onSend, onKill, onMerge, onRestore }: Ses
           {session.id}
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-text-primary)]">
-          {pr?.title ?? session.summary ?? session.status}
+          {getSessionTitle(session)}
         </span>
         {isRestorable && (
           <button
@@ -199,6 +197,7 @@ export function SessionCard({ session, onSend, onKill, onMerge, onRestore }: Ses
                 className="text-xs text-[var(--color-accent-blue)] hover:underline"
               >
                 {session.issueLabel || session.issueUrl}
+                {session.issueTitle && `: ${session.issueTitle}`}
               </a>
             </DetailSection>
           )}

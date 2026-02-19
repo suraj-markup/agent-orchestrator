@@ -1,19 +1,29 @@
+import type { Metadata } from "next";
 import { Dashboard } from "@/components/Dashboard";
 import type { DashboardSession } from "@/lib/types";
-import { getServices, getSCM, getTracker } from "@/lib/services";
+import { getServices, getSCM } from "@/lib/services";
 import {
   sessionToDashboard,
+  resolveProject,
   enrichSessionPR,
-  enrichSessionIssue,
+  enrichSessionsMetadata,
   computeStats,
 } from "@/lib/serialize";
 import { prCache, prCacheKey } from "@/lib/cache";
+import { getProjectName } from "@/lib/project-name";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const projectName = getProjectName();
+  // Use absolute to opt out of the layout's "%s | project" template
+  return { title: { absolute: `ao | ${projectName}` } };
+}
 
 export default async function Home() {
   let sessions: DashboardSession[] = [];
   let orchestratorId: string | null = null;
+  const projectName = getProjectName();
   try {
     const { config, registry, sessionManager } = await getServices();
     const allSessions = await sessionManager.list();
@@ -29,24 +39,8 @@ export default async function Home() {
     const coreSessions = allSessions.filter((s) => !s.id.endsWith("-orchestrator"));
     sessions = coreSessions.map(sessionToDashboard);
 
-    // Enrich issue labels using tracker plugin (synchronous)
-    coreSessions.forEach((core, i) => {
-      if (!sessions[i].issueUrl) return;
-      let project = config.projects[core.projectId];
-      if (!project) {
-        const entry = Object.entries(config.projects).find(([, p]) =>
-          core.id.startsWith(p.sessionPrefix),
-        );
-        if (entry) project = entry[1];
-      }
-      if (!project) {
-        const firstKey = Object.keys(config.projects)[0];
-        if (firstKey) project = config.projects[firstKey];
-      }
-      const tracker = getTracker(registry, project);
-      if (!tracker || !project) return;
-      enrichSessionIssue(sessions[i], tracker, project);
-    });
+    // Enrich metadata (issue labels, agent summaries, issue titles)
+    await enrichSessionsMetadata(coreSessions, sessions, config, registry);
 
     // Enrich sessions that have PRs with live SCM data
     // Skip enrichment for terminal sessions (merged, closed, done, terminated)
@@ -93,17 +87,7 @@ export default async function Home() {
         }
       }
 
-      let project = config.projects[core.projectId];
-      if (!project) {
-        const entry = Object.entries(config.projects).find(([, p]) =>
-          core.id.startsWith(p.sessionPrefix),
-        );
-        if (entry) project = entry[1];
-      }
-      if (!project) {
-        const firstKey = Object.keys(config.projects)[0];
-        if (firstKey) project = config.projects[firstKey];
-      }
+      const project = resolveProject(core, config.projects);
       const scm = getSCM(registry, project);
       if (!scm) return Promise.resolve();
       return enrichSessionPR(sessions[i], scm, core.pr);
@@ -114,6 +98,6 @@ export default async function Home() {
   }
 
   return (
-    <Dashboard sessions={sessions} stats={computeStats(sessions)} orchestratorId={orchestratorId} />
+    <Dashboard sessions={sessions} stats={computeStats(sessions)} orchestratorId={orchestratorId} projectName={projectName} />
   );
 }

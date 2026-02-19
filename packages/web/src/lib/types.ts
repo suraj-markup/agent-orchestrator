@@ -21,6 +21,9 @@ import {
   ACTIVITY_STATE,
   SESSION_STATUS,
   CI_STATUS,
+  TERMINAL_STATUSES,
+  TERMINAL_ACTIVITIES,
+  NON_RESTORABLE_STATUSES,
   type CICheck as CoreCICheck,
   type MergeReadiness,
   type CIStatus,
@@ -28,6 +31,9 @@ import {
   type ActivityState,
   type ReviewDecision,
 } from "@composio/ao-core/types";
+
+// Re-export for use in client components
+export { TERMINAL_STATUSES, TERMINAL_ACTIVITIES, NON_RESTORABLE_STATUSES };
 
 /**
  * Attention zone priority level, ordered by human action urgency:
@@ -58,7 +64,10 @@ export interface DashboardSession {
   issueId: string | null; // Deprecated: use issueUrl instead
   issueUrl: string | null; // Full issue URL
   issueLabel: string | null; // Human-readable label (e.g., "INT-1327", "#42")
+  issueTitle: string | null; // Full issue title (e.g., "Add user authentication flow")
   summary: string | null;
+  /** True when the summary is a low-quality fallback (e.g. truncated spawn prompt) */
+  summaryIsFallback: boolean;
   createdAt: string;
   lastActivityAt: string;
   pr: DashboardPR | null;

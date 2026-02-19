@@ -8,6 +8,7 @@ import {
   type ActivityState,
   type CostEstimate,
   type PluginModule,
+  type ProjectConfig,
   type RuntimeHandle,
   type Session,
   type WorkspaceHooksConfig,
@@ -278,11 +279,13 @@ async function parseJsonlFile(filePath: string): Promise<JsonlLine[]> {
 }
 
 /** Extract auto-generated summary from JSONL (last "summary" type entry) */
-function extractSummary(lines: JsonlLine[]): string | null {
+function extractSummary(
+  lines: JsonlLine[],
+): { summary: string; isFallback: boolean } | null {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (line?.type === "summary" && line.summary) {
-      return line.summary;
+      return { summary: line.summary, isFallback: false };
     }
   }
   // Fallback: first user message truncated to 120 chars
@@ -294,7 +297,10 @@ function extractSummary(lines: JsonlLine[]): string | null {
     ) {
       const msg = line.message.content.trim();
       if (msg.length > 0) {
-        return msg.length > 120 ? msg.substring(0, 120) + "..." : msg;
+        return {
+          summary: msg.length > 120 ? msg.substring(0, 120) + "..." : msg,
+          isFallback: true,
+        };
       }
     }
   }
@@ -714,12 +720,43 @@ function createClaudeCodeAgent(): Agent {
       // Extract session ID from filename
       const agentSessionId = basename(sessionFile, ".jsonl");
 
+      const summaryResult = extractSummary(lines);
       return {
-        summary: extractSummary(lines),
+        summary: summaryResult?.summary ?? null,
+        summaryIsFallback: summaryResult?.isFallback,
         agentSessionId,
         cost: extractCost(lines),
         lastLogModified,
       };
+    },
+
+    async getRestoreCommand(session: Session, project: ProjectConfig): Promise<string | null> {
+      if (!session.workspacePath) return null;
+
+      // Find Claude's project directory for this workspace
+      const projectPath = toClaudeProjectPath(session.workspacePath);
+      const projectDir = join(homedir(), ".claude", "projects", projectPath);
+
+      // Find the latest session JSONL file
+      const sessionFile = await findLatestSessionFile(projectDir);
+      if (!sessionFile) return null;
+
+      // Extract session UUID from filename (e.g. "abc123-def456.jsonl" → "abc123-def456")
+      const sessionUuid = basename(sessionFile, ".jsonl");
+      if (!sessionUuid) return null;
+
+      // Build resume command
+      const parts: string[] = ["claude", "--resume", shellEscape(sessionUuid)];
+
+      if (project.agentConfig?.permissions === "skip") {
+        parts.push("--dangerously-skip-permissions");
+      }
+
+      if (project.agentConfig?.model) {
+        parts.push("--model", shellEscape(project.agentConfig.model as string));
+      }
+
+      return parts.join(" ");
     },
 
     async setupWorkspaceHooks(workspacePath: string, _config: WorkspaceHooksConfig): Promise<void> {
