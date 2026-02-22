@@ -114,9 +114,9 @@ describe("getLaunchCommand", () => {
     expect(agent.getLaunchCommand(makeLaunchConfig())).toBe("codex");
   });
 
-  it("includes --approval-mode full-auto when permissions=skip", () => {
+  it("includes --dangerously-bypass-approvals-and-sandbox when permissions=skip", () => {
     const cmd = agent.getLaunchCommand(makeLaunchConfig({ permissions: "skip" }));
-    expect(cmd).toContain("--approval-mode full-auto");
+    expect(cmd).toContain("--dangerously-bypass-approvals-and-sandbox");
   });
 
   it("includes --model with shell-escaped value", () => {
@@ -133,7 +133,7 @@ describe("getLaunchCommand", () => {
     const cmd = agent.getLaunchCommand(
       makeLaunchConfig({ permissions: "skip", model: "o3", prompt: "Go" }),
     );
-    expect(cmd).toBe("codex --approval-mode full-auto --model 'o3' -- 'Go'");
+    expect(cmd).toBe("codex --dangerously-bypass-approvals-and-sandbox --model 'o3' -- 'Go'");
   });
 
   it("escapes single quotes in prompt (POSIX shell escaping)", () => {
@@ -141,9 +141,20 @@ describe("getLaunchCommand", () => {
     expect(cmd).toContain("-- 'it'\\''s broken'");
   });
 
+  it("includes --system-prompt with file cat when systemPromptFile is set", () => {
+    const cmd = agent.getLaunchCommand(makeLaunchConfig({ systemPromptFile: "/tmp/prompt.md" }));
+    expect(cmd).toContain("--system-prompt");
+    expect(cmd).toContain("$(cat '/tmp/prompt.md')");
+  });
+
+  it("includes --system-prompt with inline text when systemPrompt is set", () => {
+    const cmd = agent.getLaunchCommand(makeLaunchConfig({ systemPrompt: "Be helpful" }));
+    expect(cmd).toContain("--system-prompt 'Be helpful'");
+  });
+
   it("omits optional flags when not provided", () => {
     const cmd = agent.getLaunchCommand(makeLaunchConfig());
-    expect(cmd).not.toContain("--approval-mode");
+    expect(cmd).not.toContain("--dangerously-bypass-approvals-and-sandbox");
     expect(cmd).not.toContain("--model");
   });
 });
@@ -168,6 +179,11 @@ describe("getEnvironment", () => {
   it("omits AO_ISSUE_ID when not provided", () => {
     const env = agent.getEnvironment(makeLaunchConfig());
     expect(env["AO_ISSUE_ID"]).toBeUndefined();
+  });
+
+  it("prepends ~/.ao/bin to PATH for shell wrappers", () => {
+    const env = agent.getEnvironment(makeLaunchConfig());
+    expect(env["PATH"]).toMatch(/^.*\/\.ao\/bin:/);
   });
 });
 
@@ -255,6 +271,49 @@ describe("detectActivity", () => {
   it("returns active for non-empty terminal output", () => {
     expect(agent.detectActivity("codex is running some task\n")).toBe("active");
   });
+
+  it("returns idle when last line is a bare prompt", () => {
+    expect(agent.detectActivity("some output\n> ")).toBe("idle");
+    expect(agent.detectActivity("some output\n$ ")).toBe("idle");
+  });
+
+  it("returns waiting_input for approval prompts", () => {
+    expect(agent.detectActivity("some output\napproval required\n")).toBe("waiting_input");
+    expect(agent.detectActivity("Do you want to continue?\n(y)es / (n)o\n")).toBe("waiting_input");
+  });
+
+  it("returns active when (esc to interrupt) is present", () => {
+    expect(agent.detectActivity("Working on task (esc to interrupt)\n")).toBe("active");
+  });
+
+  it("returns active for spinner symbols with -ing words", () => {
+    expect(agent.detectActivity("✶ Reading files\n")).toBe("active");
+    expect(agent.detectActivity("⏳ Installing packages\n")).toBe("active");
+  });
+});
+
+// =========================================================================
+// getActivityState
+// =========================================================================
+describe("getActivityState", () => {
+  const agent = create();
+
+  it("returns exited when no runtimeHandle", async () => {
+    const session = makeSession({ runtimeHandle: null });
+    expect(await agent.getActivityState(session)).toEqual({ state: "exited" });
+  });
+
+  it("returns exited when process is not running", async () => {
+    mockExecFileAsync.mockRejectedValue(new Error("tmux not running"));
+    const session = makeSession({ runtimeHandle: makeTmuxHandle() });
+    expect(await agent.getActivityState(session)).toEqual({ state: "exited" });
+  });
+
+  it("returns null (unknown) when process is running", async () => {
+    mockTmuxWithProcess("codex");
+    const session = makeSession({ runtimeHandle: makeTmuxHandle() });
+    expect(await agent.getActivityState(session)).toBeNull();
+  });
 });
 
 // =========================================================================
@@ -266,5 +325,20 @@ describe("getSessionInfo", () => {
   it("always returns null (not implemented)", async () => {
     expect(await agent.getSessionInfo(makeSession())).toBeNull();
     expect(await agent.getSessionInfo(makeSession({ workspacePath: "/some/path" }))).toBeNull();
+  });
+});
+
+// =========================================================================
+// setupWorkspaceHooks & postLaunchSetup
+// =========================================================================
+describe("workspace hooks", () => {
+  const agent = create();
+
+  it("has setupWorkspaceHooks method", () => {
+    expect(typeof agent.setupWorkspaceHooks).toBe("function");
+  });
+
+  it("has postLaunchSetup method", () => {
+    expect(typeof agent.postLaunchSetup).toBe("function");
   });
 });
