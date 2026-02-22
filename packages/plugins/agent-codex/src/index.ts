@@ -57,8 +57,11 @@ update_ao_metadata() {
 
   local temp_file="\${metadata_file}.tmp.\$\$"
 
+  # Escape sed metacharacters in value (& expands to matched text, | breaks delimiter)
+  local escaped_value="\$(printf '%s' "\$value" | sed 's/[&|\\\\]/\\\\&/g')"
+
   if grep -q "^\${key}=" "\$metadata_file" 2>/dev/null; then
-    sed "s|^\${key}=.*|\${key}=\${value}|" "\$metadata_file" > "\$temp_file"
+    sed "s|^\${key}=.*|\${key}=\${escaped_value}|" "\$metadata_file" > "\$temp_file"
   else
     cp "\$metadata_file" "\$temp_file"
     printf '%s=%s\\n' "\$key" "\$value" >> "\$temp_file"
@@ -77,7 +80,7 @@ const GH_WRAPPER = `#!/usr/bin/env bash
 
 # Find real gh by removing our wrapper directory from PATH
 ao_bin_dir="\$(cd "\$(dirname "\$0")" && pwd)"
-clean_path="\$(echo "\$PATH" | tr ':' '\\n' | grep -v "^\$ao_bin_dir\$" | tr '\\n' ':')"
+clean_path="\$(echo "\$PATH" | tr ':' '\\n' | grep -Fxv "\$ao_bin_dir" | tr '\\n' ':')"
 clean_path="\${clean_path%:}"
 real_gh="\$(PATH="\$clean_path" command -v gh 2>/dev/null)"
 
@@ -126,7 +129,7 @@ const GIT_WRAPPER = `#!/usr/bin/env bash
 
 # Find real git by removing our wrapper directory from PATH
 ao_bin_dir="\$(cd "\$(dirname "\$0")" && pwd)"
-clean_path="\$(echo "\$PATH" | tr ':' '\\n' | grep -v "^\$ao_bin_dir\$" | tr '\\n' ':')"
+clean_path="\$(echo "\$PATH" | tr ':' '\\n' | grep -Fxv "\$ao_bin_dir" | tr '\\n' ':')"
 clean_path="\${clean_path%:}"
 real_git="\$(PATH="\$clean_path" command -v git 2>/dev/null)"
 
