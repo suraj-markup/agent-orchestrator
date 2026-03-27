@@ -10,7 +10,7 @@ import {
 } from "@/lib/serialize";
 import { getCorrelationId, jsonWithCorrelation, recordApiObservation } from "@/lib/observability";
 import { resolveGlobalPause } from "@/lib/global-pause";
-import { filterProjectSessions } from "@/lib/project-utils";
+import { filterProjectSessions, resolveProjectFilter } from "@/lib/project-utils";
 
 const METADATA_ENRICH_TIMEOUT_MS = 3_000;
 const PR_ENRICH_TIMEOUT_MS = 4_000;
@@ -40,10 +40,7 @@ export async function GET(request: Request) {
     const activeOnly = searchParams.get("active") === "true";
 
     const { config, registry, sessionManager } = await getServices();
-    const requestedProjectId =
-      projectFilter && projectFilter !== "all" && config.projects[projectFilter]
-        ? projectFilter
-        : undefined;
+    const requestedProjectId = resolveProjectFilter(projectFilter, config.projects);
     const coreSessions = await sessionManager.list(requestedProjectId);
     const allSessions = requestedProjectId ? await sessionManager.list() : coreSessions;
     const visibleSessions = filterProjectSessions(coreSessions, projectFilter, config.projects);
