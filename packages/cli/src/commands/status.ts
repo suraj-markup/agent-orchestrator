@@ -12,6 +12,7 @@ import {
   type ProjectConfig,
   isOrchestratorSession,
   loadConfig,
+  getConfigSearchPaths,
 } from "@aoagents/ao-core";
 import { git, getTmuxSessions, getTmuxActivity } from "../lib/shell.js";
 import {
@@ -266,6 +267,11 @@ export function registerStatus(program: Command): void {
           config = loadConfig();
         } catch {
           console.log(chalk.yellow("No config found. Run `ao init` first."));
+          console.log(
+            chalk.dim(
+              `Searched: cwd up-tree, $AO_CONFIG_PATH, ${getConfigSearchPaths().join(", ")}`,
+            ),
+          );
           console.log(chalk.dim("Falling back to session discovery...\n"));
           await showFallbackStatus();
           return;
@@ -283,6 +289,9 @@ export function registerStatus(program: Command): void {
 
         if (!opts.json) {
           console.log(banner("AGENT ORCHESTRATOR STATUS"));
+          if (config.configPath) {
+            console.log(chalk.dim(`  Config: ${config.configPath}`));
+          }
           if (opts.watch) {
             console.log(
               chalk.dim(

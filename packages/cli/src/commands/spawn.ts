@@ -3,6 +3,7 @@ import ora from "ora";
 import type { Command } from "commander";
 import { resolve } from "node:path";
 import {
+  ConfigNotFoundError,
   loadConfig,
   TERMINAL_STATUSES,
   type OrchestratorConfig,
@@ -14,6 +15,31 @@ import { getSessionManager } from "../lib/create-session-manager.js";
 import { preflight } from "../lib/preflight.js";
 import { findProjectForDirectory } from "../lib/project-resolution.js";
 import { getRunning } from "../lib/running-state.js";
+
+/**
+ * Load config and translate the "not found" error into a spawn-specific
+ * message. The ConfigNotFoundError from core already lists search paths;
+ * this adds the concrete next step for someone trying to use `ao spawn`
+ * without first running `ao init`.
+ */
+function loadConfigForSpawn(): OrchestratorConfig {
+  try {
+    return loadConfig();
+  } catch (err) {
+    if (err instanceof ConfigNotFoundError) {
+      console.error(chalk.red(`✗ ${err.message}`));
+      console.error(
+        chalk.yellow(
+          "\nAgents: create a config before spawning.\n" +
+            "  ao init                   # interactive setup\n" +
+            "  # or set AO_CONFIG_PATH=/path/to/agent-orchestrator.yaml",
+        ),
+      );
+      process.exit(1);
+    }
+    throw err;
+  }
+}
 
 /**
  * Auto-detect the project ID from the config.
@@ -222,7 +248,7 @@ export function registerSpawn(program: Command): void {
           process.exit(1);
         }
 
-        const config = loadConfig();
+        const config = loadConfigForSpawn();
         let projectId: string;
         let issueId: string | undefined;
 
@@ -274,7 +300,7 @@ export function registerBatchSpawn(program: Command): void {
     .argument("<issues...>", "Issue identifiers (project is auto-detected)")
     .option("--open", "Open sessions in terminal tabs")
     .action(async (issues: string[], opts: { open?: boolean }) => {
-      const config = loadConfig();
+      const config = loadConfigForSpawn();
       let projectId: string;
 
       try {

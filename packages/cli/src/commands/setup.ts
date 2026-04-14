@@ -10,7 +10,8 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 import type { Command } from "commander";
 import { parse as yamlParse, parseDocument } from "yaml";
@@ -386,6 +387,61 @@ function writeOpenClawJsonConfig(token: string): boolean {
 }
 
 /**
+ * Locate the bundled SKILL.md asset shipped with the CLI. At runtime the
+ * asset lives next to the compiled sources under `dist/assets/SKILL.md`
+ * (see `cli/package.json` build script). During `pnpm dev` / tsx it is
+ * still at `src/assets/SKILL.md`.
+ */
+function findBundledSkillAsset(): string | null {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    // commands/ -> .. -> assets/SKILL.md  (both dist and src layouts)
+    join(here, "..", "assets", "SKILL.md"),
+    // Fallback: repo source layout when running from packages/cli/src
+    join(here, "..", "..", "src", "assets", "SKILL.md"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/**
+ * Install the AO skill definition into `~/.openclaw/skills/ao.skill.md` so
+ * OpenClaw agents can discover `ao` without being manually told it exists.
+ * Returns the destination path on success, null on failure.
+ *
+ * This is the OpenClaw-side half of the bidirectional integration: AO
+ * already sends notifications to OpenClaw via the hooks webhook; this step
+ * registers AO as a tool/skill in OpenClaw so the agent knows the webhook
+ * channel exists and how to drive it.
+ */
+function installOpenClawSkill(): { path: string; updated: boolean } | null {
+  const assetPath = findBundledSkillAsset();
+  if (!assetPath) return null;
+
+  try {
+    const skillsDir = join(homedir(), ".openclaw", "skills");
+    mkdirSync(skillsDir, { recursive: true });
+    const destPath = join(skillsDir, "ao.skill.md");
+
+    const newContent = readFileSync(assetPath, "utf-8");
+    let updated = false;
+    if (existsSync(destPath)) {
+      const existing = readFileSync(destPath, "utf-8");
+      if (existing === newContent) {
+        return { path: destPath, updated: false };
+      }
+      updated = true;
+    }
+    writeFileSync(destPath, newContent);
+    return { path: destPath, updated };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Append `export OPENCLAW_HOOKS_TOKEN=...` to the user's shell profile
  * (~/.zshrc or ~/.bashrc). Skips if the export line already exists.
  * Returns the profile path on success, undefined on failure.
@@ -432,6 +488,7 @@ function printOpenClawInstructions(
   nonInteractive: boolean,
   openclawConfigWritten: boolean,
   shellProfilePath: string | undefined,
+  skillInstallPath: string | null,
 ): void {
   if (openclawConfigWritten) {
     // Both configs written automatically
@@ -449,6 +506,9 @@ function printOpenClawInstructions(
       console.log(chalk.dim("  ~/.openclaw/openclaw.json — hooks block"));
       if (shellProfilePath) {
         console.log(chalk.dim(`  ${shellProfilePath} — OPENCLAW_HOOKS_TOKEN export`));
+      }
+      if (skillInstallPath) {
+        console.log(chalk.dim(`  ${skillInstallPath} — AO skill (agent discoverability)`));
       }
       console.log(`\n${chalk.yellow("Restart OpenClaw gateway to apply.")}`);
     }
@@ -573,8 +633,21 @@ export async function runSetupAction(opts: SetupOptions): Promise<void> {
     console.log(chalk.green(`✓ Exported OPENCLAW_HOOKS_TOKEN in ${shellProfilePath}`));
   }
 
+  // --- Install SKILL.md so OpenClaw agents can discover ao -----------------
+  const skillInstall = installOpenClawSkill();
+  if (skillInstall && nonInteractive) {
+    const verb = skillInstall.updated ? "Updated" : "Installed";
+    console.log(chalk.green(`✓ ${verb} OpenClaw skill at ${skillInstall.path}`));
+  } else if (!skillInstall && nonInteractive) {
+    console.log(
+      chalk.yellow(
+        "⚠ Could not install OpenClaw skill (~/.openclaw/skills/ao.skill.md) — SKILL.md asset missing or not writable.",
+      ),
+    );
+  }
+
   // --- Print instructions --------------------------------------------------
-  printOpenClawInstructions(nonInteractive, openclawConfigWritten, shellProfilePath);
+  printOpenClawInstructions(nonInteractive, openclawConfigWritten, shellProfilePath, skillInstall?.path ?? null);
 
   // --- Done ----------------------------------------------------------------
   if (!nonInteractive) {

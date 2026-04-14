@@ -620,13 +620,48 @@ function applyDefaultReactions(config: OrchestratorConfig): OrchestratorConfig {
 }
 
 /**
+ * Return the XDG config home directory.
+ * Honours `$XDG_CONFIG_HOME` per the XDG Base Directory Specification,
+ * falling back to `~/.config`.
+ */
+function xdgConfigHome(): string {
+  const env = process.env["XDG_CONFIG_HOME"];
+  if (env && env.length > 0) return env;
+  return join(homedir(), ".config");
+}
+
+/**
+ * Standard filenames AO looks for when searching a directory.
+ * Listed in priority order.
+ */
+const CONFIG_FILENAMES = ["agent-orchestrator.yaml", "agent-orchestrator.yml"] as const;
+
+/**
+ * Home-directory fallback locations for the config file.
+ * Exported so `ao status` / error messages can show where we looked.
+ */
+export function getConfigSearchPaths(): string[] {
+  const xdgDir = join(xdgConfigHome(), "agent-orchestrator");
+  return [
+    // Dotfile-style in $HOME (legacy)
+    resolve(homedir(), ".agent-orchestrator.yaml"),
+    resolve(homedir(), ".agent-orchestrator.yml"),
+    // XDG: $XDG_CONFIG_HOME/agent-orchestrator/agent-orchestrator.yaml
+    resolve(xdgDir, "agent-orchestrator.yaml"),
+    resolve(xdgDir, "agent-orchestrator.yml"),
+    // XDG: $XDG_CONFIG_HOME/agent-orchestrator/config.yaml (legacy)
+    resolve(xdgDir, "config.yaml"),
+  ];
+}
+
+/**
  * Search for config file in standard locations.
  *
  * Search order:
  * 1. AO_CONFIG_PATH environment variable (if set)
  * 2. Search up directory tree from CWD (like git)
  * 3. Explicit startDir (if provided)
- * 4. Home directory locations
+ * 4. Home directory locations (including XDG)
  */
 export function findConfigFile(startDir?: string): string | null {
   // 1. Check environment variable override
@@ -639,9 +674,7 @@ export function findConfigFile(startDir?: string): string | null {
 
   // 2. Search up directory tree from CWD (like git)
   const searchUpTree = (dir: string): string | null => {
-    const configFiles = ["agent-orchestrator.yaml", "agent-orchestrator.yml"];
-
-    for (const filename of configFiles) {
+    for (const filename of CONFIG_FILENAMES) {
       const configPath = resolve(dir, filename);
       if (existsSync(configPath)) {
         return configPath;
@@ -665,8 +698,7 @@ export function findConfigFile(startDir?: string): string | null {
 
   // 3. Check explicit startDir if provided
   if (startDir) {
-    const files = ["agent-orchestrator.yaml", "agent-orchestrator.yml"];
-    for (const filename of files) {
+    for (const filename of CONFIG_FILENAMES) {
       const path = resolve(startDir, filename);
       if (existsSync(path)) {
         return path;
@@ -674,14 +706,8 @@ export function findConfigFile(startDir?: string): string | null {
     }
   }
 
-  // 4. Check home directory locations
-  const homePaths = [
-    resolve(homedir(), ".agent-orchestrator.yaml"),
-    resolve(homedir(), ".agent-orchestrator.yml"),
-    resolve(homedir(), ".config", "agent-orchestrator", "config.yaml"),
-  ];
-
-  for (const path of homePaths) {
+  // 4. Check home directory locations (legacy dotfile + XDG)
+  for (const path of getConfigSearchPaths()) {
     if (existsSync(path)) {
       return path;
     }

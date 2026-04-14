@@ -16,6 +16,7 @@ export {
   getDefaultConfig,
   findConfig,
   findConfigFile,
+  getConfigSearchPaths,
 } from "./config.js";
 
 // Plugin registry
