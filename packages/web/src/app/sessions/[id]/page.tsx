@@ -8,6 +8,7 @@ import { type DashboardSession, type ActivityState, getAttentionLevel, type Atte
 import { activityIcon } from "@/lib/activity-icons";
 import type { ProjectInfo } from "@/lib/project-name";
 import { getSessionTitle } from "@/lib/format";
+import { apiPath } from "@/lib/api-path";
 import { useSSESessionActivity } from "@/hooks/useSSESessionActivity";
 
 function truncate(s: string, max: number): string {
@@ -75,6 +76,7 @@ export default function SessionPage() {
   const resolvedProjectSessionsKeyRef = useRef<string | null>(null);
   const prefixByProjectRef = useRef<Map<string, string>>(new Map());
   const hasLoadedSessionRef = useRef(false);
+  const fetchSessionFailingRef = useRef(false);
 
   // Keep prefixByProjectRef in sync so fetchProjectSessions (stable [] dep) reads latest map
   useEffect(() => {
@@ -83,7 +85,7 @@ export default function SessionPage() {
 
   // Fetch project prefix map once on mount so isOrchestratorSession can use the correct prefix
   useEffect(() => {
-    fetch("/api/projects")
+    fetch(apiPath("/api/projects"))
       .then((res) => res.ok ? res.json() : null)
       .then((data: { projects?: ProjectInfo[] } | null) => {
         if (data?.projects) {
@@ -119,7 +121,7 @@ export default function SessionPage() {
   // Fetch session data (memoized to avoid recreating on every render)
   const fetchSession = useCallback(async () => {
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
+      const res = await fetch(apiPath(`/api/sessions/${encodeURIComponent(id)}`));
       if (res.status === 404) {
         if (!hasLoadedSessionRef.current) {
           setSessionMissing(true);
@@ -133,8 +135,14 @@ export default function SessionPage() {
       setRouteError(null);
       setSessionMissing(false);
       hasLoadedSessionRef.current = true;
+      fetchSessionFailingRef.current = false;
     } catch (err) {
-      console.error("Failed to fetch session:", err);
+      // Only log the first failure in a streak so the 5s polling loop doesn't
+      // flood the console on transient errors (e.g. proxy blip, offline tab).
+      if (!fetchSessionFailingRef.current) {
+        console.error("Failed to fetch session:", err);
+        fetchSessionFailingRef.current = true;
+      }
       if (!hasLoadedSessionRef.current) {
         setRouteError(err instanceof Error ? err : new Error("Failed to load session"));
       }
@@ -153,7 +161,7 @@ export default function SessionPage() {
       const query = isOrchestrator
         ? `/api/sessions?project=${encodeURIComponent(projectId)}`
         : `/api/sessions?project=${encodeURIComponent(projectId)}&orchestratorOnly=true`;
-      const res = await fetch(query);
+      const res = await fetch(apiPath(query));
       if (!res.ok) return;
       const body = (await res.json()) as ProjectSessionsBody;
       const sessions = body.sessions ?? [];
@@ -190,7 +198,7 @@ export default function SessionPage() {
 
   const fetchSidebarSessions = useCallback(async () => {
     try {
-      const res = await fetch("/api/sessions");
+      const res = await fetch(apiPath("/api/sessions"));
       if (!res.ok) return;
       const body = (await res.json()) as { sessions?: DashboardSession[] } | null;
       setSidebarSessions(body?.sessions ?? []);
