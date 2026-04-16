@@ -51,7 +51,7 @@ Each slot entry defines:
 
 Each slot directory must contain `slot.json`.
 
-For the current `idea-generation` slot, the contract declares:
+For the current slot types, the contract declares:
 
 - where configs live
 - where prompt sources live
@@ -70,6 +70,17 @@ For `idea-generation`, a config should define:
 - `sourceTypes`
 - `scoringAxes`
 
+For `idea-validation`, a config should define:
+
+- `promptSource`
+- `ideaSource`
+- `researchMode`
+- `outputMode`
+- `sourceTypes`
+- `researchDimensions`
+- `scoringAxes`
+- `scoreScale`
+
 The prompt source is a Markdown file in `sources/`.
 
 ## Current Example
@@ -78,6 +89,9 @@ The repo currently includes:
 
 - `agents/idea-sourcer/`
 - slot: `idea-generation`
+- config: `codex`
+- `agents/idea-validator/`
+- slot: `idea-validation`
 - config: `codex`
 
 ## Validation

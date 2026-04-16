@@ -17,6 +17,8 @@ agents/
     agent-manifest.schema.json
     idea-generation-slot.schema.json
     idea-generation-config.schema.json
+    idea-validation-slot.schema.json
+    idea-validation-config.schema.json
   idea-sourcer/
     agent.json
     prompts/
@@ -28,6 +30,17 @@ agents/
           codex.json
         sources/
           codex-idea-generation.md
+  idea-validator/
+    agent.json
+    prompts/
+      system.md
+    slots/
+      idea-validation/
+        slot.json
+        configs/
+          codex.json
+        sources/
+          codex-idea-validation.md
 ```
 
 ## Concepts
@@ -37,6 +50,11 @@ agents/
 - `slots/<slot-name>/slot.json`: slot contract and metadata
 - `slots/<slot-name>/sources/`: Markdown prompt sources used by slot configs
 - `slots/<slot-name>/configs/*.json`: concrete configurations for a slot
+
+## Current Agents
+
+- `idea-sourcer`: generates and expands candidate ideas
+- `idea-validator`: pulls sourced ideas and scores them with web-backed validation research
 
 ## Validation
 
