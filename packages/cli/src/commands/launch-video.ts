@@ -14,7 +14,9 @@ import {
   summarizeReviseResult,
 } from "../lib/launch-video/pipeline.js";
 
-const DEFAULT_OUTPUT_ROOT = "artifacts/reference-launch-videos";
+const DEFAULT_INGEST_OUTPUT_ROOT = "artifacts/reference-launch-videos";
+const DEFAULT_PIPELINE_OUTPUT_ROOT =
+  "/Users/suraj.markupgmail.com/Desktop/video-hackathon-mvp";
 const DEFAULT_PROJECT_NAME = "Launch Video MVP";
 
 export function registerLaunchVideo(program: Command): void {
@@ -28,7 +30,7 @@ export function registerLaunchVideo(program: Command): void {
       "Analyze a reference video, persist reusable artifacts, and generate a launch blueprint",
     )
     .argument("<input>", "Path to the reference video")
-    .option("-o, --output-root <path>", "Artifact root directory", DEFAULT_OUTPUT_ROOT)
+    .option("-o, --output-root <path>", "Artifact root directory", DEFAULT_INGEST_OUTPUT_ROOT)
     .option("--sample-interval <seconds>", "Seconds between sampled frames", "2")
     .option(
       "--scene-threshold <delta>",
@@ -76,7 +78,7 @@ export function registerLaunchVideo(program: Command): void {
     .command("analyze")
     .description("Extract and persist analysis outputs for a reference video")
     .requiredOption("-i, --input <path>", "Reference video path")
-    .option("-o, --output-root <path>", "Artifact root", DEFAULT_OUTPUT_ROOT)
+    .option("-o, --output-root <path>", "Artifact root", DEFAULT_PIPELINE_OUTPUT_ROOT)
     .option("--project-name <name>", "Project name for seeded blueprint", DEFAULT_PROJECT_NAME)
     .option("--force", "Regenerate outputs even when the cache matches")
     .action(
@@ -101,7 +103,7 @@ export function registerLaunchVideo(program: Command): void {
     .description("Build blueprint-v1.json from a persisted analysis bundle")
     .option("-i, --input <path>", "Reference video path")
     .option("--artifact-dir <path>", "Existing artifact directory")
-    .option("-o, --output-root <path>", "Artifact root", DEFAULT_OUTPUT_ROOT)
+    .option("-o, --output-root <path>", "Artifact root", DEFAULT_PIPELINE_OUTPUT_ROOT)
     .option("--assets <path>", "Optional asset override JSON")
     .option("--project-name <name>", "Project name for the blueprint", DEFAULT_PROJECT_NAME)
     .option("--force", "Regenerate blueprint even when it already exists")
@@ -129,7 +131,7 @@ export function registerLaunchVideo(program: Command): void {
     .description("Create a concrete render handoff for the persisted blueprint")
     .option("-i, --input <path>", "Reference video path")
     .option("--artifact-dir <path>", "Existing artifact directory")
-    .option("-o, --output-root <path>", "Artifact root", DEFAULT_OUTPUT_ROOT)
+    .option("-o, --output-root <path>", "Artifact root", DEFAULT_PIPELINE_OUTPUT_ROOT)
     .option("--project-name <name>", "Project name for the build plan", DEFAULT_PROJECT_NAME)
     .option("--force", "Regenerate the build plan")
     .action(
@@ -156,7 +158,7 @@ export function registerLaunchVideo(program: Command): void {
     .description("Write a structured judge-v1.json review for the current blueprint")
     .option("-i, --input <path>", "Reference video path")
     .option("--artifact-dir <path>", "Existing artifact directory")
-    .option("-o, --output-root <path>", "Artifact root", DEFAULT_OUTPUT_ROOT)
+    .option("-o, --output-root <path>", "Artifact root", DEFAULT_PIPELINE_OUTPUT_ROOT)
     .option("--project-name <name>", "Project name for judge context", DEFAULT_PROJECT_NAME)
     .option("--force", "Regenerate the judge output")
     .action(
@@ -183,7 +185,7 @@ export function registerLaunchVideo(program: Command): void {
     .description("Persist the next revision target from judge-v1.json")
     .option("-i, --input <path>", "Reference video path")
     .option("--artifact-dir <path>", "Existing artifact directory")
-    .option("-o, --output-root <path>", "Artifact root", DEFAULT_OUTPUT_ROOT)
+    .option("-o, --output-root <path>", "Artifact root", DEFAULT_PIPELINE_OUTPUT_ROOT)
     .option("--project-name <name>", "Project name for revision context", DEFAULT_PROJECT_NAME)
     .option("--force", "Regenerate the revision plan")
     .action(
