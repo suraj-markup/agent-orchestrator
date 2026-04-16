@@ -87,7 +87,7 @@ Output the complete .tsx file now:`;
 
   const response = await client.chat.completions.create({
     model: "gpt-5.4",
-    max_tokens: 8000,
+    max_completion_tokens: 8000,
     temperature: 0.3,
     messages: [
       { role: "system", content: systemPrompt },

@@ -26,7 +26,7 @@ export async function llmJudge(
 
   const response = await client.chat.completions.create({
     model: "gpt-5.4",
-    max_tokens: 2000,
+    max_completion_tokens: 2000,
     messages: [
       {
         role: "system",
