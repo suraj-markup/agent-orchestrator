@@ -170,7 +170,7 @@ function clampScore(value: number): number {
   return Math.max(1, Math.min(10, Math.round(value)));
 }
 
-function swiftToolPath(): string {
+export function getSwiftToolPath(): string {
   return resolve(
     decodeURIComponent(
       new URL("../../assets/launch-video/avfoundation-tool.swift", import.meta.url).pathname,
@@ -181,7 +181,7 @@ function swiftToolPath(): string {
 function createTempSwiftTool(): string {
   const tempDir = mkdtempSync(join(tmpdir(), "ao-launch-video-"));
   const tempScriptPath = join(tempDir, "avfoundation-tool.swift");
-  writeFileSync(tempScriptPath, readFileSync(swiftToolPath(), "utf8"), "utf8");
+  writeFileSync(tempScriptPath, readFileSync(getSwiftToolPath(), "utf8"), "utf8");
   return tempScriptPath;
 }
 
