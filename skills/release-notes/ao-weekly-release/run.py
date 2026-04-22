@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -72,7 +73,10 @@ class PullRequest:
                     rest = rest[rest.index(")") + 1:]
                 if rest.startswith(":"):
                     rest = rest[1:]
-                return rest.strip() or title
+                title = rest.strip() or title
+                break
+        # Strip any trailing inline PR refs like (#1060) to avoid doubling
+        title = re.sub(r"\s*\(#\d+\)\s*$", "", title)
         return title
 
 
@@ -90,6 +94,9 @@ class Snapshot:
     contributors: list[str]
     stars_now: int | None
     stars_delta: int | None
+    npm_version: str | None = None
+    since_sha: str | None = None
+    until_sha: str | None = None
 
     @property
     def window_label(self) -> str:
@@ -243,6 +250,56 @@ def fetch_stars(repo: str) -> int | None:
         return None
 
 
+def fetch_npm_version(package: str = "@aoagents/ao") -> str | None:
+    """Fetch the latest published version from the npm registry."""
+    try:
+        result = subprocess.run(
+            ["npm", "view", package, "version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        version = result.stdout.strip()
+        return version if version else None
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def resolve_commit_sha(repo: str, date: datetime) -> str | None:
+    """Resolve a date to a commit SHA, preferring local git, falling back to the API."""
+    iso = date.isoformat()
+    if shutil.which("git") is not None:
+        try:
+            result = subprocess.run(
+                ["git", "rev-list", "-1", f"--before={iso}", "main"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            sha = result.stdout.strip()
+            if sha:
+                return sha[:12]
+        except subprocess.CalledProcessError:
+            pass
+    try:
+        out = run_gh([
+            "api",
+            "-X",
+            "GET",
+            f"repos/{repo}/commits",
+            "-f",
+            f"until={iso}",
+            "-f",
+            "per_page=1",
+            "-q",
+            ".[0].sha",
+        ])
+        sha = out.strip()
+        return sha[:12] if sha else None
+    except SystemExit:
+        return None
+
+
 def compute_contributors(prs: list[PullRequest]) -> list[str]:
     seen: dict[str, None] = {}
     for pr in prs:
@@ -285,6 +342,9 @@ def gather(repo: str, since: datetime, until: datetime, mode: str) -> Snapshot:
     contributors = compute_contributors(prs)
     stars = fetch_stars(repo)
     delta = stars_delta_estimate(repo, stars)
+    npm_version = fetch_npm_version()
+    since_sha = resolve_commit_sha(repo, since)
+    until_sha = resolve_commit_sha(repo, until)
     return Snapshot(
         repo=repo,
         since=since,
@@ -298,6 +358,9 @@ def gather(repo: str, since: datetime, until: datetime, mode: str) -> Snapshot:
         contributors=contributors,
         stars_now=stars,
         stars_delta=delta,
+        npm_version=npm_version,
+        since_sha=since_sha,
+        until_sha=until_sha,
     )
 
 
@@ -306,11 +369,19 @@ def format_theme_order(prs: list[PullRequest]) -> list[PullRequest]:
     return sorted(prs, key=lambda p: (order.get(p.theme, 99), p.number))
 
 
+_LEADING_VERB_RE = re.compile(
+    r"^(add|fix|refactor|update|remove|change|implement|improve|enable|disable|"
+    r"document|test|clean|drop|bump|migrate|introduce|support|handle|replace|"
+    r"rename|move|extract|merge|revert|skip|allow|prevent|ensure)\b",
+    re.IGNORECASE,
+)
+
+
 def render_highlights(prs: list[PullRequest]) -> tuple[list[str], int]:
     ordered = format_theme_order(prs)
     bullets: list[str] = []
     for pr in ordered[:MAX_HIGHLIGHTS]:
-        verb = {
+        theme_verb = {
             "feature": "Added",
             "fix": "Fixed",
             "refactor": "Refactored",
@@ -320,9 +391,15 @@ def render_highlights(prs: list[PullRequest]) -> tuple[list[str], int]:
             "other": "Changed",
         }[pr.theme]
         body = pr.clean_title
-        if body and body[0].isupper():
-            body = body[0].lower() + body[1:]
-        bullets.append(f"- {verb} {body} (#{pr.number})")
+        # If the cleaned title already starts with a verb, capitalize it
+        # and use it directly — avoids "Added add …" stutter.
+        if _LEADING_VERB_RE.match(body):
+            body = body[0].upper() + body[1:]
+        else:
+            if body and body[0].isupper():
+                body = body[0].lower() + body[1:]
+            body = f"{theme_verb} {body}"
+        bullets.append(f"- {body} (#{pr.number})")
     overflow = max(0, len(ordered) - MAX_HIGHLIGHTS)
     return bullets, overflow
 
@@ -342,8 +419,9 @@ def render_markdown(snap: Snapshot) -> str:
         highlights.append(
             f"- Quiet week: {len(snap.merged_prs)} merged PR(s); every change is listed above."
         )
-    if overflow:
-        highlights.append(f"- … and {overflow} more — see the full changelog.")
+    # Track total omitted PRs across both the initial cap and any later truncation.
+    # The overflow sentinel line is rendered once at the end by truncate_if_needed.
+    total_omitted = overflow
 
     stars_line = (
         f"- Stars: {snap.stars_now}"
@@ -360,17 +438,20 @@ def render_markdown(snap: Snapshot) -> str:
         stars_line,
     ]
 
-    tag = snap.latest_release_tag or "latest"
+    version = snap.npm_version or "latest"
     install_block = [
         "## Install",
         "```bash",
         "npm install -g @aoagents/ao",
-        f"# or pin to the current release: npm install -g @aoagents/ao@{tag.lstrip('v')}",
+        f"# or pin to the current release: npm install -g @aoagents/ao@{version}",
         "```",
     ]
 
     release_url = snap.latest_release_url or f"https://github.com/{snap.repo}/releases"
-    changelog_url = f"https://github.com/{snap.repo}/compare/main@{{{snap.since.strftime('%Y-%m-%d')}}}...main@{{{snap.until.strftime('%Y-%m-%d')}}}"
+    if snap.since_sha and snap.until_sha:
+        changelog_url = f"https://github.com/{snap.repo}/compare/{snap.since_sha}...{snap.until_sha}"
+    else:
+        changelog_url = f"https://github.com/{snap.repo}/commits/main"
     links = [
         "## Links",
         f"- Release: {release_url}",
@@ -379,6 +460,7 @@ def render_markdown(snap: Snapshot) -> str:
         "- Discord: https://discord.gg/agent-orchestrator",
     ]
 
+    release_version = version if version != "latest" else "X.Y.Z"
     release_checklist = [
         "## Release commands",
         "```bash",
@@ -388,7 +470,7 @@ def render_markdown(snap: Snapshot) -> str:
         "git add . && git commit -m \"chore: version packages\"",
         "pnpm -r build",
         "pnpm -r publish --access public --no-git-checks",
-        f"gh release create v{tag.lstrip('v') if snap.latest_release_tag else 'X.Y.Z'} --generate-notes",
+        f"gh release create v{release_version} --generate-notes",
         "git push origin main --follow-tags",
         "```",
     ]
@@ -409,6 +491,10 @@ def render_markdown(snap: Snapshot) -> str:
         f" • mode: {snap.mode}"
         f" • window: {snap.window_label}_"
     )
+
+    # Append the overflow line now (before truncation adjusts it).
+    if total_omitted:
+        highlights.append(f"- … and {total_omitted} more — see the full changelog.")
 
     parts: list[str] = [
         title,
@@ -433,7 +519,7 @@ def render_markdown(snap: Snapshot) -> str:
     ]
 
     body = "\n".join(parts)
-    return truncate_if_needed(body, snap)
+    return truncate_if_needed(body, total_omitted)
 
 
 def build_positioning_line(snap: Snapshot) -> str:
@@ -446,7 +532,7 @@ def build_positioning_line(snap: Snapshot) -> str:
     )
 
 
-def truncate_if_needed(body: str, snap: Snapshot) -> str:
+def truncate_if_needed(body: str, already_omitted: int) -> str:
     plain = "\n".join(line for line in body.splitlines() if not line.startswith("```"))
     if len(plain) <= MAX_BODY_CHARS:
         return body
@@ -459,6 +545,9 @@ def truncate_if_needed(body: str, snap: Snapshot) -> str:
         return body
 
     kept = lines[start:end]
+    # Remove any existing overflow sentinel so we can re-render it with the correct total.
+    if kept and kept[-1].startswith("- … and "):
+        kept.pop()
     dropped = 0
     while kept and len(
         "\n".join(ln for ln in (lines[:start] + kept + lines[end:]) if not ln.startswith("```"))
@@ -466,8 +555,9 @@ def truncate_if_needed(body: str, snap: Snapshot) -> str:
         kept.pop()
         dropped += 1
 
-    if dropped:
-        kept.append(f"- … and {dropped} more — see the full changelog.")
+    total = already_omitted + dropped
+    if total:
+        kept.append(f"- … and {total} more — see the full changelog.")
 
     return "\n".join(lines[:start] + kept + lines[end:])
 
