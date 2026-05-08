@@ -270,6 +270,60 @@ enum SelfTest {
             failures.append("socket round-trip — \(err)")
         }
 
+        // ── MoodScheduler distribution + idle override ──────────────────
+        // Random idle rotation: 50/30/20 weights for sleeping/happy/working.
+        assertEqual(MoodScheduler.weightedMood(roll: 0.00),  .sleeping, "weighted: 0.00 → sleeping")
+        assertEqual(MoodScheduler.weightedMood(roll: 0.49),  .sleeping, "weighted: 0.49 → sleeping")
+        assertEqual(MoodScheduler.weightedMood(roll: 0.50),  .happy,    "weighted: 0.50 → happy")
+        assertEqual(MoodScheduler.weightedMood(roll: 0.79),  .happy,    "weighted: 0.79 → happy")
+        assertEqual(MoodScheduler.weightedMood(roll: 0.80),  .working,  "weighted: 0.80 → working")
+        assertEqual(MoodScheduler.weightedMood(roll: 0.999), .working,  "weighted: 0.999 → working")
+
+        // The random pool MUST exclude attention/event moods.
+        for i in 0..<1000 {
+            let roll = Double(i) / 1000.0
+            let mood = MoodScheduler.weightedMood(roll: roll)
+            assertTrue(mood != .alert,  "weighted: never alert  (roll=\(roll))")
+            assertTrue(mood != .sad,    "weighted: never sad    (roll=\(roll))")
+            assertTrue(mood != .hidden, "weighted: never hidden (roll=\(roll))")
+        }
+
+        // Idle override at 5min forces sleeping regardless of roll.
+        let idleSched = MoodScheduler(
+            pickRoll: { 0.95 },
+            pickInterval: { 30 },
+            idleProvider: { 350 },
+            onTick: { _ in }
+        )
+        assertEqual(idleSched.pickMood(), .sleeping, "idle ≥ 300 → forced sleeping")
+        assertEqual(MoodScheduler.forceSleepIdleSeconds, 300, "forceSleepIdleSeconds = 300")
+
+        // Just below threshold honours the random roll.
+        let activeSched = MoodScheduler(
+            pickRoll: { 0.95 },
+            pickInterval: { 30 },
+            idleProvider: { 299 },
+            onTick: { _ in }
+        )
+        assertEqual(activeSched.pickMood(), .working, "idle < 300 → random pick")
+
+        // ── Switch-sprite cycle ─────────────────────────────────────────
+        // Three sets must be available and cycleSprite must rotate
+        // through them, persisting each pick to the supplied defaults.
+        assertEqual(SpriteLoader.availableSets, ["oneko", "cat", "dog"], "availableSets")
+        let suite = "AOPetSelfTest.\(UUID().uuidString)"
+        let testDefaults = UserDefaults(suiteName: suite)!
+        defer { testDefaults.removePersistentDomain(forName: suite) }
+        let manager = WindowManager(defaults: testDefaults)
+        assertEqual(manager.currentSpriteName, "oneko", "cycle: starts at oneko")
+        let s1 = manager.cycleSprite()
+        assertEqual(s1, "cat", "cycle: oneko → cat")
+        let s2 = manager.cycleSprite()
+        assertEqual(s2, "dog", "cycle: cat → dog")
+        let s3 = manager.cycleSprite()
+        assertEqual(s3, "oneko", "cycle: dog → oneko")
+        assertEqual(testDefaults.string(forKey: "pet.spriteSet"), "oneko", "cycle: persisted")
+
         if failures.isEmpty {
             print("AOPet self-test: all assertions passed")
             return 0

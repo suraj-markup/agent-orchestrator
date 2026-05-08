@@ -55,7 +55,18 @@ MOOD_TO_FRAMES = {
     "alert":    [("scratchSelf", 0), ("scratchSelf", 1), ("scratchSelf", 2)],
 }
 
-BUNDLED_SETS = ["oneko"]
+# Bundled sets. Each set is the same oneko atlas optionally retinted so
+# the "Switch sprite" menu does something visible. License/NOTICE still
+# covers all three since the source pixels are unchanged.
+BUNDLED_SETS = ["oneko", "cat", "dog"]
+
+# RGB multiplicative tint applied per-set to non-transparent pixels.
+# (1, 1, 1) keeps the original art. cat = cooler grey, dog = warm brown.
+SET_TINTS: dict[str, tuple[float, float, float]] = {
+    "oneko": (1.00, 1.00, 1.00),
+    "cat":   (0.78, 0.82, 0.92),
+    "dog":   (1.10, 0.85, 0.55),
+}
 
 
 def fetch_atlas(dest: str) -> str:
@@ -104,14 +115,38 @@ def main() -> int:
             if fname.endswith(".png"):
                 os.remove(os.path.join(out_dir, fname))
 
+        tint = SET_TINTS.get(set_name, (1.0, 1.0, 1.0))
         for mood, frame_specs in MOOD_TO_FRAMES.items():
             for i, (oneko_key, oneko_idx) in enumerate(frame_specs):
                 tile = cropped[(oneko_key, oneko_idx)]
-                tile.save(os.path.join(out_dir, f"{mood}_{i}.png"))
+                tinted = apply_tint(tile, tint)
+                tinted.save(os.path.join(out_dir, f"{mood}_{i}.png"))
         total = sum(len(v) for v in MOOD_TO_FRAMES.values())
         print(f"wrote {set_name}: {total} frames")
 
     return 0
+
+
+def apply_tint(image: Image.Image, tint: tuple[float, float, float]) -> Image.Image:
+    """Multiply RGB channels of non-transparent pixels by `tint`. Alpha is
+    preserved, so the silhouette stays identical and only the colour shifts.
+    Returns the input unchanged if tint is identity."""
+    if tint == (1.0, 1.0, 1.0):
+        return image.copy()
+    pixels = image.load()
+    out = Image.new("RGBA", image.size)
+    out_pixels = out.load()
+    for y in range(image.size[1]):
+        for x in range(image.size[0]):
+            r, g, b, a = pixels[x, y]
+            if a == 0:
+                out_pixels[x, y] = (0, 0, 0, 0)
+                continue
+            rr = min(255, max(0, int(r * tint[0])))
+            gg = min(255, max(0, int(g * tint[1])))
+            bb = min(255, max(0, int(b * tint[2])))
+            out_pixels[x, y] = (rr, gg, bb, a)
+    return out
 
 
 if __name__ == "__main__":

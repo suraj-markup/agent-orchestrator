@@ -4,15 +4,23 @@ import AppKit
 /// (created on demand once any session exists), routes socket events to
 /// it, and labels event bubbles with the originating project name from
 /// the latest poller snapshot.
+///
+/// Note: as of the event-driven pivot the manager **no longer drives the
+/// pet's mood** from session status. The mood comes from
+/// `PetController.MoodScheduler` (random rotation + idle-sleep). This
+/// class is now responsible only for show/hide, sprite switching, and
+/// event routing.
 final class WindowManager {
     private var controller: PetController?
-    private var currentSpriteName: String
+    private(set) var currentSpriteName: String
     private var spriteSet: SpriteSet
     private var projectNames: [String: String] = [:]
+    private let defaults: UserDefaults
     private static let defaultsKey = "pet.spriteSet"
 
-    init() {
-        let defaultsName = UserDefaults.standard.string(forKey: WindowManager.defaultsKey)
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let defaultsName = defaults.string(forKey: WindowManager.defaultsKey)
         let initial = defaultsName
             ?? SpriteLoader.availableSets.first
             ?? "oneko"
@@ -36,9 +44,10 @@ final class WindowManager {
 
     // MARK: - Reconcile
 
-    /// Show / hide / update the single pet to match the current
-    /// instance-wide state. The pet hides when no sessions exist
-    /// anywhere or when the user has explicitly hidden it.
+    /// Show or hide the pet based on whether AO has any sessions
+    /// running and whether the user has explicitly hidden it. The
+    /// pet's mood is **not** driven from here — see `MoodScheduler`.
+    /// `state.mood` is intentionally ignored.
     func reconcile(state: StateAggregator.InstanceState, projectNames: [String: String]) {
         self.projectNames = projectNames
 
@@ -61,10 +70,7 @@ final class WindowManager {
             controller = c
         }
 
-        guard let controller = controller else { return }
-        controller.updateMood(state.mood)
-
-        if let screen = NSScreen.main {
+        if let screen = NSScreen.main, let controller = controller {
             let fallback = WindowLayout.origin(
                 forIndex: 0,
                 size: PetView.totalSize,
@@ -88,16 +94,23 @@ final class WindowManager {
 
     // MARK: - Sprite switching
 
-    private func cycleSprite() {
+    /// Advance to the next bundled sprite set and persist the choice to
+    /// UserDefaults so it survives a relaunch. `internal` so tests can
+    /// drive the cycle directly.
+    @discardableResult
+    func cycleSprite() -> String {
         let sets = SpriteLoader.availableSets
         guard sets.count > 1, let currentIdx = sets.firstIndex(of: currentSpriteName) else {
-            return
+            return currentSpriteName
         }
         let nextName = sets[(currentIdx + 1) % sets.count]
-        guard let next = SpriteLoader.load(nextName) else { return }
+        guard let next = SpriteLoader.load(nextName) else {
+            return currentSpriteName
+        }
         currentSpriteName = nextName
         spriteSet = next
-        UserDefaults.standard.set(nextName, forKey: WindowManager.defaultsKey)
+        defaults.set(nextName, forKey: WindowManager.defaultsKey)
         controller?.updateSpriteSet(next)
+        return nextName
     }
 }
