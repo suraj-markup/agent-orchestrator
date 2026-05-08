@@ -353,20 +353,19 @@ enum SelfTest {
         assertEqual(activeSched.pickMood(), .working, "idle < 300 → random pick")
 
         // ── Switch-sprite cycle ─────────────────────────────────────────
-        // Three sets must be available and cycleSprite must rotate
-        // through them, persisting each pick to the supplied defaults.
-        assertEqual(SpriteLoader.availableSets, ["oneko", "cat", "dog"], "availableSets")
+        // Two real animals (oneko cat MIT + dog public-domain XBM).
+        // cycleSprite rotates through them and persists each pick to
+        // the supplied UserDefaults.
+        assertEqual(SpriteLoader.availableSets, ["oneko", "dog"], "availableSets")
         let suite = "AOPetSelfTest.\(UUID().uuidString)"
         let testDefaults = UserDefaults(suiteName: suite)!
         defer { testDefaults.removePersistentDomain(forName: suite) }
         let manager = WindowManager(defaults: testDefaults)
         assertEqual(manager.currentSpriteName, "oneko", "cycle: starts at oneko")
         let s1 = manager.cycleSprite()
-        assertEqual(s1, "cat", "cycle: oneko → cat")
+        assertEqual(s1, "dog", "cycle: oneko → dog")
         let s2 = manager.cycleSprite()
-        assertEqual(s2, "dog", "cycle: cat → dog")
-        let s3 = manager.cycleSprite()
-        assertEqual(s3, "oneko", "cycle: dog → oneko")
+        assertEqual(s2, "oneko", "cycle: dog → oneko")
         assertEqual(testDefaults.string(forKey: "pet.spriteSet"), "oneko", "cycle: persisted")
 
         if failures.isEmpty {
