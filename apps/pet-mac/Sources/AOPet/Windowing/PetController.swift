@@ -70,7 +70,17 @@ final class PetController {
         guard newMood != mood else { return }
         mood = newMood
         tick = 0
+        // Overlay badges disambiguate moods the oneko sheet doesn't have
+        // a unique pose for. See MoodOverlayView.
+        switch newMood {
+        case .sad:   view.setOverlay(.exclaim)
+        case .happy: view.setOverlay(.check)
+        default:     view.setOverlay(nil)
+        }
         renderFrame()
+        // Different moods animate at different cadences — re-arm the
+        // tick timer so e.g. walking runs at 8 fps but sleeping at 1 fps.
+        startAnimation()
     }
 
     func updateSpriteSet(_ set: SpriteSet) {
@@ -95,7 +105,11 @@ final class PetController {
     // MARK: - Animation
 
     private func startAnimation() {
-        let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in
+        animationTimer?.invalidate()
+        let timer = Timer(
+            timeInterval: mood.frameDurationSeconds,
+            repeats: true
+        ) { [weak self] _ in
             guard let self = self else { return }
             self.tick += 1
             self.renderFrame()

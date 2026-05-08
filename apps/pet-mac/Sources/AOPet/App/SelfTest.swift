@@ -133,37 +133,56 @@ enum SelfTest {
         assertTrue(PetMood.working.priority < PetMood.sad.priority, "working<sad")
         assertTrue(PetMood.sad.priority < PetMood.alert.priority, "sad<alert")
 
-        // ── Sprite loader ───────────────────────────────────────────────
-        if let dog = SpriteLoader.load("dog") {
-            assertEqual(dog.name, "dog", "dog name")
-            for mood in [PetMood.sleeping, .happy, .working, .sad, .alert] {
-                assertTrue(
-                    dog.frameCount(for: mood) >= 2,
-                    "dog \(mood.rawValue) frames ≥ 2 (got \(dog.frameCount(for: mood)))"
+        // ── Sprite loader (oneko) ───────────────────────────────────────
+        if let oneko = SpriteLoader.load("oneko") {
+            assertEqual(oneko.name, "oneko", "oneko name")
+            // Canonical state → frame counts per the AO/oneko mapping.
+            let expected: [(PetMood, Int)] = [
+                (.sleeping, 2),
+                (.working,  2),
+                (.happy,    2),
+                (.sad,      2),
+                (.alert,    3),
+            ]
+            for (mood, count) in expected {
+                assertEqual(
+                    oneko.frameCount(for: mood),
+                    count,
+                    "oneko \(mood.rawValue) frame count"
                 )
+                for tick in 0..<count {
+                    assertNotNil(
+                        oneko.image(for: mood, tick: tick),
+                        "oneko \(mood.rawValue) tick \(tick) image"
+                    )
+                }
             }
-            let count = dog.frameCount(for: .working)
-            let first = dog.image(for: .working, tick: 0)
-            let wrap = dog.image(for: .working, tick: count)
-            let neg = dog.image(for: .working, tick: -1)
-            assertNotNil(first, "dog working frame 0 image")
-            assertNotNil(wrap, "dog working wrapped image")
-            assertNotNil(neg, "dog working negative tick image")
+            let workingCount = oneko.frameCount(for: .working)
+            let first = oneko.image(for: .working, tick: 0)
+            let wrap = oneko.image(for: .working, tick: workingCount)
+            let neg = oneko.image(for: .working, tick: -1)
+            assertNotNil(first, "oneko working frame 0 image")
+            assertNotNil(wrap, "oneko working wrapped image")
+            assertNotNil(neg, "oneko working negative tick image")
         } else {
-            failures.append("dog sprite set failed to load")
-        }
-
-        if let cat = SpriteLoader.load("cat") {
-            assertEqual(cat.name, "cat", "cat name")
-            assertTrue(cat.frameCount(for: .working) >= 2, "cat working frames ≥ 2")
-        } else {
-            failures.append("cat sprite set failed to load")
+            failures.append("oneko sprite set failed to load")
         }
 
         assertTrue(SpriteLoader.load("does-not-exist") == nil, "missing set → nil")
 
         let empty = SpriteSet(name: "empty", frames: [:])
         assertTrue(empty.frameCount(for: .working) >= 1, "empty frameCount lower-bounded at 1")
+
+        // Per-mood timing must distinguish walks from sleep — otherwise
+        // walking stutters at sleep cadence.
+        assertTrue(
+            PetMood.working.frameDurationSeconds < PetMood.sleeping.frameDurationSeconds,
+            "working < sleeping frame duration"
+        )
+        assertTrue(
+            PetMood.alert.frameDurationSeconds < PetMood.happy.frameDurationSeconds,
+            "alert < happy frame duration"
+        )
 
         // ── Socket round-trip ───────────────────────────────────────────
         // Real bind/connect/write/read against a temp socket. This is the

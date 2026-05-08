@@ -1,0 +1,48 @@
+AOPet — third-party assets and licenses
+========================================
+
+Sprite art
+----------
+
+The cat sprite frames bundled under
+`Sources/AOPet/Resources/sprites/oneko/` are derived from the Oneko cat
+sprite atlas distributed by adryd325/oneko.js.
+
+  Source repo:  https://github.com/adryd325/oneko.js
+  Source file:  oneko.gif (256x128 atlas, 8x4 grid of 32x32 frames)
+  License:      MIT
+
+Original artwork: Oneko (Naoshi Ikeya, 1989).
+
+The atlas is fetched at build-asset-generation time by
+`scripts/generate_sprites.py`, cropped per the canonical oneko.js
+`spriteSets` table, and saved as per-mood PNG frames. No transformations
+beyond cropping are applied.
+
+The full text of the oneko.js MIT license follows. A copy is preserved
+here so distributing AOPet does not require pulling adryd325/oneko.js as
+a build dependency.
+
+---
+
+MIT License
+
+Copyright (c) 2020 Adrian Caballero
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

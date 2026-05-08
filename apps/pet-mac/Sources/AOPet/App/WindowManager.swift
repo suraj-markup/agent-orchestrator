@@ -12,7 +12,9 @@ final class WindowManager {
 
     init() {
         let defaultsName = UserDefaults.standard.string(forKey: WindowManager.defaultsKey)
-        let initial = defaultsName ?? SpriteLoader.availableSets.first ?? "dog"
+        let initial = defaultsName
+            ?? SpriteLoader.availableSets.first
+            ?? "oneko"
         currentSpriteName = initial
         if let loaded = SpriteLoader.load(initial) {
             spriteSet = loaded
