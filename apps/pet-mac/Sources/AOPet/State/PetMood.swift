@@ -95,6 +95,14 @@ enum StateAggregator {
 
     /// Collapse every session into one InstanceState. Empty input maps
     /// to `.hidden` with `totalSessions = 0`.
+    ///
+    /// **Note (event-driven pivot):** the `mood` field is no longer
+    /// consumed by the pet. Visible mood is driven by `MoodScheduler`
+    /// (random rotation + idle-sleep) plus event overrides.
+    /// `WindowManager.reconcile` now only uses `totalSessions` to
+    /// decide whether to show the pet at all. `mood(for:)` and the
+    /// worst-state pick are retained because they're still tested and
+    /// may have future consumers (status-bar item, etc.).
     static func aggregateGlobal(sessions: [WireSession]) -> InstanceState {
         if sessions.isEmpty {
             return InstanceState(mood: .hidden, totalSessions: 0)

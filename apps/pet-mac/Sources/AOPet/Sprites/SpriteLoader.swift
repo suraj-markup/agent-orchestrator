@@ -30,10 +30,12 @@ struct SpriteSet: Equatable {
 
 enum SpriteLoader {
     /// Names of sprite sets shipped in the bundle, in the order the
-    /// "Switch sprite" menu cycles through them. Currently a single
-    /// Oneko-derived set; adding a variant is just dropping a new
-    /// directory under Resources/sprites/.
-    static let availableSets: [String] = ["oneko"]
+    /// "Switch sprite" menu cycles through them. All three are Oneko
+    /// frames retinted at generation time (cat = cooler grey, dog =
+    /// warm brown) so the cycle is visibly distinct without shipping
+    /// new artwork. Drop additional directories under
+    /// `Resources/sprites/` to add more variants.
+    static let availableSets: [String] = ["oneko", "cat", "dog"]
 
     /// Frames are upscaled to this rendering size with nearest-neighbor so
     /// the pixel-art reads crisply on Retina displays. Matches PetView's

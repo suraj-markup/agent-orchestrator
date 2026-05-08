@@ -15,6 +15,24 @@ final class PetController {
     private var animationTimer: Timer?
     private var tick = 0
 
+    /// Drives the pet's idle mood. The pet is now event-driven: the
+    /// scheduler picks a random non-attention mood every 20–45s, and
+    /// socket events temporarily override that pick for ~10s before
+    /// the rotation resumes.
+    private var moodScheduler: MoodScheduler?
+    /// While set and in the future, the scheduler's pick is ignored.
+    /// Cleared when the override expires or when a new event lands.
+    private var eventOverrideExpiry: Date?
+
+    /// How long an event-driven mood (`urgent → .alert`,
+    /// `action → .happy`) sticks before the random rotation resumes.
+    private static let eventOverrideSeconds: TimeInterval = 10
+
+    /// Force `.sleeping` when the OS reports user idle ≥ this many
+    /// seconds. Threaded into the scheduler from here so the constant
+    /// is discoverable on the controller.
+    private static let forceSleepIdleSeconds: TimeInterval = 300
+
     /// Called when the user picks "Switch sprite".
     var onSwitchSprite: (() -> Void)?
     /// Called when the user picks "Hide pet".
@@ -30,6 +48,7 @@ final class PetController {
         view.menuProvider = { [weak self] in self?.buildMenu() }
         renderFrame()
         startAnimation()
+        startMoodScheduler()
     }
 
     // MARK: - Lifecycle
@@ -49,8 +68,27 @@ final class PetController {
     func close() {
         animationTimer?.invalidate()
         animationTimer = nil
+        moodScheduler?.stop()
+        moodScheduler = nil
         NotificationCenter.default.removeObserver(self)
         window.orderOut(nil)
+    }
+
+    private func startMoodScheduler() {
+        let scheduler = MoodScheduler { [weak self] mood in
+            self?.applyScheduledMood(mood)
+        }
+        scheduler.start()
+        moodScheduler = scheduler
+    }
+
+    private func applyScheduledMood(_ mood: PetMood) {
+        // While an event override is in effect, leave the mood pinned.
+        // The override's resume timer will pick the next mood when it
+        // expires, so we don't need to drop ticks forever.
+        if let expiry = eventOverrideExpiry, Date() < expiry { return }
+        eventOverrideExpiry = nil
+        updateMood(mood)
     }
 
     @objc private func didMove() {
@@ -90,13 +128,28 @@ final class PetController {
         guard PetController.shouldShowBubble(for: event.priority) else { return }
 
         let tint: NSColor
+        let pinnedMood: PetMood
         switch event.priority {
-        case .urgent:  tint = NSColor.systemRed
-        case .action:  tint = NSColor.systemBlue
+        case .urgent:
+            tint = NSColor.systemRed
+            pinnedMood = .alert
+        case .action:
+            tint = NSColor.systemBlue
+            pinnedMood = .happy
         // Filtered above; fall back to a neutral tint defensively.
         case .warning, .info, .unknown:
             tint = NSColor(white: 0.2, alpha: 1)
+            pinnedMood = mood
         }
+
+        // Pin the mood so the random scheduler doesn't immediately
+        // overwrite an attention pose. The override expires after
+        // eventOverrideSeconds; the resume timer below transitions
+        // back to a fresh scheduler pick rather than waiting up to
+        // 45s for the next regular tick.
+        eventOverrideExpiry = Date().addingTimeInterval(PetController.eventOverrideSeconds)
+        updateMood(pinnedMood)
+
         let duration: TimeInterval = event.priority == .urgent ? 6 : 4
         let text = PetController.bubbleText(
             message: event.message,
@@ -106,10 +159,24 @@ final class PetController {
         view.showBubble(text: text, tint: tint, durationSeconds: duration)
         view.playReaction(PetView.ReactionKind.forPriority(event.priority))
 
-        // Audio cue for attention-worthy events. Fire-and-forget on the
-        // current thread — NSSound.play returns immediately.
         if let soundName = PetController.soundName(for: event.priority) {
             NSSound(named: NSSound.Name(soundName))?.play()
+        }
+
+        // Resume the random rotation when the pin expires — without
+        // this we'd stay alert/happy until the next 20–45s tick.
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + PetController.eventOverrideSeconds
+        ) { [weak self] in
+            self?.resumeFromOverrideIfExpired()
+        }
+    }
+
+    private func resumeFromOverrideIfExpired() {
+        guard let expiry = eventOverrideExpiry, Date() >= expiry else { return }
+        eventOverrideExpiry = nil
+        if let next = moodScheduler?.pickMood() {
+            updateMood(next)
         }
     }
 
