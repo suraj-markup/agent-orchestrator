@@ -1,29 +1,27 @@
 import AppKit
 
-/// Owns one pet window for a single project. Updates sprite frame on a timer,
-/// reacts to events with a one-shot animation + thought bubble, and provides
-/// a right-click context menu.
+/// Owns the single global pet window. Updates sprite frame on a timer,
+/// reacts to events with a one-shot animation + thought bubble (labelled
+/// with the originating project), and provides a right-click context menu.
 final class PetController {
-    let projectId: String
-    private(set) var projectName: String
+    /// Identity for `PositionStore` and the hidden flag. Always
+    /// `PositionStore.globalKey` today, but kept as an init parameter so
+    /// tests (and a possible future per-project mode) can override it.
+    let positionKey: String
     private var mood: PetMood = .sleeping
     private var spriteSet: SpriteSet
     private let window: PetWindow
     private let view: PetView
     private var animationTimer: Timer?
     private var tick = 0
-    /// Index in the layout stack — set by the WindowManager.
-    var layoutIndex: Int = 0
 
-    /// Called when the user picks "Switch sprite" — manager rotates which set
-    /// every controller uses so all pets stay visually consistent.
+    /// Called when the user picks "Switch sprite".
     var onSwitchSprite: (() -> Void)?
-    /// Called when the user picks "Hide" — manager removes the controller.
+    /// Called when the user picks "Hide pet".
     var onHide: (() -> Void)?
 
-    init(projectId: String, projectName: String, spriteSet: SpriteSet) {
-        self.projectId = projectId
-        self.projectName = projectName
+    init(positionKey: String = PositionStore.globalKey, spriteSet: SpriteSet) {
+        self.positionKey = positionKey
         self.spriteSet = spriteSet
         self.window = PetWindow(size: PetView.totalSize)
         self.view = PetView(frame: NSRect(origin: .zero, size: PetView.totalSize))
@@ -37,10 +35,9 @@ final class PetController {
     // MARK: - Lifecycle
 
     func show(at fallbackOrigin: NSPoint) {
-        let origin = PositionStore.load(for: projectId) ?? fallbackOrigin
+        let origin = PositionStore.load(for: positionKey) ?? fallbackOrigin
         window.setFrameOrigin(origin)
         window.orderFrontRegardless()
-        // Persist position whenever the user drags the window.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(didMove),
@@ -57,14 +54,10 @@ final class PetController {
     }
 
     @objc private func didMove() {
-        PositionStore.save(window.frame.origin, for: projectId)
+        PositionStore.save(window.frame.origin, for: positionKey)
     }
 
     // MARK: - State updates
-
-    func updateName(_ name: String) {
-        projectName = name
-    }
 
     func updateMood(_ newMood: PetMood) {
         guard newMood != mood else { return }
@@ -88,8 +81,10 @@ final class PetController {
         renderFrame()
     }
 
-    /// Show an event reaction: bubble + one-shot animation.
-    func handleEvent(_ event: SocketEvent) {
+    /// Show an event reaction: bubble + one-shot animation. The bubble
+    /// is prefixed with `[projectName]` so the user can tell which
+    /// project the event came from in a single-pet world.
+    func handleEvent(_ event: SocketEvent, projectName: String?) {
         let tint: NSColor
         switch event.priority {
         case .urgent:  tint = NSColor.systemRed
@@ -98,8 +93,19 @@ final class PetController {
         case .info, .unknown: tint = NSColor(white: 0.2, alpha: 1)
         }
         let duration: TimeInterval = event.priority == .urgent ? 6 : 4
-        view.showBubble(text: event.message, tint: tint, durationSeconds: duration)
+        let text = PetController.bubbleText(message: event.message, projectName: projectName)
+        view.showBubble(text: text, tint: tint, durationSeconds: duration)
         view.playReaction(PetView.ReactionKind.forPriority(event.priority))
+    }
+
+    /// Compose the bubble text. ProjectName is truncated to 16 chars so
+    /// long names don't blow the bubble's width budget.
+    static func bubbleText(message: String, projectName: String?) -> String {
+        guard let name = projectName, !name.isEmpty else { return message }
+        let truncated = name.count > 16
+            ? String(name.prefix(16)) + "…"
+            : name
+        return "[\(truncated)] \(message)"
     }
 
     // MARK: - Animation
@@ -128,7 +134,7 @@ final class PetController {
         let menu = NSMenu(title: "AOPet")
 
         let hideItem = NSMenuItem(
-            title: "Hide \(projectName) pet",
+            title: "Hide pet",
             action: #selector(menuHide),
             keyEquivalent: ""
         )
@@ -157,7 +163,7 @@ final class PetController {
     }
 
     @objc private func menuHide() {
-        PositionStore.setHidden(true, for: projectId)
+        PositionStore.setHidden(true, for: positionKey)
         onHide?()
     }
 

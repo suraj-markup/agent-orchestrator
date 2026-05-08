@@ -37,14 +37,10 @@ final class StateAggregatorTests: XCTestCase {
     }
 
     func testReviewPendingProducesHappy() {
-        // review_pending is "PR open, waiting on a human reviewer" — same
-        // vibe as pr_open. Without this, the pet sleeps through the
-        // entire review cycle.
         XCTAssertEqual(StateAggregator.mood(for: session("s", "p", .reviewPending, .idle)), .happy)
     }
 
     func testMergedProducesHappy() {
-        // The celebration moment before cleanup ticks the session to done.
         XCTAssertEqual(StateAggregator.mood(for: session("s", "p", .merged, .idle)), .happy)
     }
 
@@ -60,58 +56,65 @@ final class StateAggregatorTests: XCTestCase {
         XCTAssertEqual(StateAggregator.mood(for: session("s", "p", .done)), .sleeping)
     }
 
-    // MARK: - Worst-state picker
+    // MARK: - Global aggregator
 
-    func testWorstStatePicksAlertOverWorkingAndHappy() {
+    func testEmptySessionsProducesHiddenInstance() {
+        let state = StateAggregator.aggregateGlobal(sessions: [])
+        XCTAssertEqual(state.mood, .hidden)
+        XCTAssertEqual(state.totalSessions, 0)
+        XCTAssertFalse(state.hasSessions)
+    }
+
+    func testSingleSessionPicksItsMood() {
+        let state = StateAggregator.aggregateGlobal(sessions: [
+            session("a", "p1", .working, .active)
+        ])
+        XCTAssertEqual(state.mood, .working)
+        XCTAssertEqual(state.totalSessions, 1)
+        XCTAssertTrue(state.hasSessions)
+    }
+
+    func testGlobalCollapsesAcrossProjectsWithWorstMoodWinning() {
+        // Three projects, four sessions: one worker, one happy PR, one
+        // sad CI failure, one human-block. The instance-wide pick is
+        // `alert` (highest priority).
         let sessions = [
             session("a", "p1", .working, .active),
-            session("b", "p1", .prOpen, .idle),
-            session("c", "p1", .needsInput, .waitingInput)
+            session("b", "p2", .prOpen, .idle),
+            session("c", "p3", .ciFailed, .ready),
+            session("d", "p1", .needsInput, .waitingInput),
         ]
-        let projects = StateAggregator.aggregate(sessions: sessions, projectNames: ["p1": "Proj"])
-        XCTAssertEqual(projects.count, 1)
-        XCTAssertEqual(projects[0].mood, .alert)
-        XCTAssertEqual(projects[0].sessionCount, 3)
+        let state = StateAggregator.aggregateGlobal(sessions: sessions)
+        XCTAssertEqual(state.mood, .alert)
+        XCTAssertEqual(state.totalSessions, 4)
     }
 
-    func testWorstStatePicksSadOverWorking() {
+    func testGlobalCollapsesPicksSadWhenNoAlert() {
         let sessions = [
             session("a", "p1", .working, .active),
-            session("b", "p1", .ciFailed, .ready)
+            session("b", "p2", .ciFailed, .ready),
+            session("c", "p3", .prOpen, .idle),
         ]
-        let projects = StateAggregator.aggregate(sessions: sessions, projectNames: [:])
-        XCTAssertEqual(projects[0].mood, .sad)
+        let state = StateAggregator.aggregateGlobal(sessions: sessions)
+        XCTAssertEqual(state.mood, .sad)
+        XCTAssertEqual(state.totalSessions, 3)
     }
 
-    func testGroupingProducesOneEntryPerProject() {
+    func testGlobalCollapsesAllIdleProducesSleeping() {
         let sessions = [
-            session("a", "p1", .working, .active),
-            session("b", "p1", .working, .active),
-            session("c", "p2", .done)
+            session("a", "p1", .idle, .idle),
+            session("b", "p2", .done),
+            session("c", "p3", .done),
         ]
-        let projects = StateAggregator.aggregate(
-            sessions: sessions,
-            projectNames: ["p1": "Alpha", "p2": "Beta"]
-        )
-        XCTAssertEqual(projects.count, 2)
-        // Sorted by projectName.
-        XCTAssertEqual(projects.map { $0.projectName }, ["Alpha", "Beta"])
-        XCTAssertEqual(projects[0].mood, .working)
-        XCTAssertEqual(projects[1].mood, .sleeping)
+        let state = StateAggregator.aggregateGlobal(sessions: sessions)
+        XCTAssertEqual(state.mood, .sleeping)
+        XCTAssertEqual(state.totalSessions, 3)
     }
 
-    func testProjectIdFallbackWhenNoNameAvailable() {
-        let sessions = [session("a", "no-orch", .working, .active)]
-        let projects = StateAggregator.aggregate(sessions: sessions, projectNames: [:])
-        XCTAssertEqual(projects[0].projectName, "no-orch")
-    }
-
-    func testEmptySessionsProducesNoProjects() {
-        XCTAssertTrue(StateAggregator.aggregate(sessions: [], projectNames: [:]).isEmpty)
-    }
+    // MARK: - Mood priority ordering
 
     func testMoodPriorityOrdering() {
-        // Verify the priority ordering that the worst-state picker depends on.
+        // The global aggregator's worst-state pick depends on this.
         XCTAssertLessThan(PetMood.sleeping.priority, PetMood.happy.priority)
         XCTAssertLessThan(PetMood.happy.priority, PetMood.working.priority)
         XCTAssertLessThan(PetMood.working.priority, PetMood.sad.priority)

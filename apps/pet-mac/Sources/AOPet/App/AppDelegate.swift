@@ -10,11 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let poller = SessionPoller { response in
             let names = response.projectNames()
-            let projects = StateAggregator.aggregate(
-                sessions: response.sessions,
-                projectNames: names
-            )
-            manager.reconcile(with: projects)
+            let state = StateAggregator.aggregateGlobal(sessions: response.sessions)
+            manager.reconcile(state: state, projectNames: names)
         }
         poller.start()
         self.poller = poller
