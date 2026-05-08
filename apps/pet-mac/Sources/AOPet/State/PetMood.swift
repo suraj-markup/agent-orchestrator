@@ -4,7 +4,7 @@ import Foundation
 /// Order in `priority(_:)` is the worst-state ranking — higher number wins.
 enum PetMood: String, CaseIterable, Equatable {
     case sleeping       // all sessions idle/done — no work happening
-    case happy          // PR ready (pr_open / approved / mergeable)
+    case happy          // PR open / under review / approved / mergeable / merged
     case working        // someone is actively working / typing
     case sad            // ci_failed / stuck / blocked
     case alert          // waiting_input — needs human now
@@ -59,9 +59,11 @@ enum StateAggregator {
             return .sad
         }
 
-        // 3. PR is in a good place.
+        // 3. PR is in a good place. review_pending is just "PR open,
+        // waiting on a human reviewer" — same vibe as pr_open. merged is
+        // the celebration moment before cleanup ticks the session to done.
         switch session.status {
-        case .prOpen, .approved, .mergeable:
+        case .prOpen, .reviewPending, .approved, .mergeable, .merged:
             return .happy
         default:
             break

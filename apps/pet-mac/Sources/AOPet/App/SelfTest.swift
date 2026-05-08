@@ -95,7 +95,9 @@ enum SelfTest {
         assertEqual(StateAggregator.mood(for: session("s","p", .stuck)), .sad, "stuck → sad")
         assertEqual(StateAggregator.mood(for: session("s","p", .working, .blocked)), .sad, "blocked activity → sad")
         assertEqual(StateAggregator.mood(for: session("s","p", .prOpen, .idle)), .happy, "pr_open → happy")
+        assertEqual(StateAggregator.mood(for: session("s","p", .reviewPending, .idle)), .happy, "review_pending → happy")
         assertEqual(StateAggregator.mood(for: session("s","p", .approved, .idle)), .happy, "approved → happy")
+        assertEqual(StateAggregator.mood(for: session("s","p", .merged, .idle)), .happy, "merged → happy")
         assertEqual(StateAggregator.mood(for: session("s","p", .working, .active)), .working, "working → working")
         assertEqual(StateAggregator.mood(for: session("s","p", .idle, .idle)), .sleeping, "idle → sleeping")
         assertEqual(StateAggregator.mood(for: session("s","p", .done)), .sleeping, "done → sleeping")
@@ -113,7 +115,7 @@ enum SelfTest {
         let twoProj = StateAggregator.aggregate(sessions: [
             session("a","p1", .working, .active),
             session("b","p1", .working, .active),
-            session("c","p2", .merged)
+            session("c","p2", .done)
         ], projectNames: ["p1": "Alpha", "p2": "Beta"])
         assertEqual(twoProj.count, 2, "two-project count")
         assertEqual(twoProj.map { $0.projectName }, ["Alpha", "Beta"], "two-project sort by name")
