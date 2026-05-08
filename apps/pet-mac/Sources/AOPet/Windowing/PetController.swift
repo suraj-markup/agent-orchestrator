@@ -46,9 +46,23 @@ final class PetController {
         window.contentView = view
 
         view.menuProvider = { [weak self] in self?.buildMenu() }
+        view.onPreferredSizeChange = { [weak self] newSize in
+            self?.resizeWindow(to: newSize)
+        }
         renderFrame()
         startAnimation()
         startMoodScheduler()
+    }
+
+    /// Grow or shrink the window to match the view's requested size.
+    /// Bottom-left origin is preserved so the sprite stays planted on
+    /// screen — only the top edge moves. Bubble auto-grow goes up; the
+    /// auto-hide path then shrinks back to the default size.
+    private func resizeWindow(to size: NSSize) {
+        var frame = window.frame
+        guard frame.size != size else { return }
+        frame.size = size
+        window.setFrame(frame, display: true, animate: false)
     }
 
     // MARK: - Lifecycle
@@ -200,12 +214,14 @@ final class PetController {
         }
     }
 
-    /// Hard ceiling on rendered bubble characters. The bubble is ~152pt
-    /// wide at 9pt medium, which fits roughly this many glyphs on one
-    /// line before NSString truncation kicks in. We do an explicit
-    /// budget so the cut always falls on the message — projectName and
-    /// sessionId are needed for disambiguation and never get clipped.
-    private static let bubbleCharBudget = 60
+    /// Soft ceiling on the message's character length. The bubble auto
+    /// -grows to fit text up to `PetView.maxBubbleHeight` (~8 lines of
+    /// 13pt body), which is roughly 200 chars at this width. The
+    /// budget protects against pathological inputs (1MB messages) and
+    /// guarantees that, when truncation does happen, the cut falls on
+    /// the message — projectName and sessionId are needed for
+    /// disambiguation and never get clipped.
+    private static let bubbleCharBudget = 250
 
     /// Compose `<projectName> <sessionId> <message>`. ProjectName falls
     /// back to projectId via the caller; if neither is known the prefix

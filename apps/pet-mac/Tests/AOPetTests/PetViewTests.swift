@@ -128,21 +128,72 @@ final class PetViewTests: XCTestCase {
         )
     }
 
-    func testBubbleTextTruncatesMessageNotIdentifiers() {
-        // Long message + short project/session: cut MUST fall on the
-        // message so the user can still tell which session this is.
-        let longMessage = String(repeating: "x", count: 200)
+    func testBubbleTextPreservesNormalLengthMessageInFull() {
+        // Realistic-length messages that fit under the budget must
+        // round-trip unchanged — no ellipsis, no clipping. The bubble
+        // wraps visually; we don't pre-truncate any more.
+        let normal = "Session ao-170 needs your approval to merge the pull request"
         let result = PetController.bubbleText(
-            message: longMessage,
+            message: normal,
+            projectName: "agent-orchestrator",
+            sessionId: "ao-170"
+        )
+        XCTAssertEqual(result, "agent-orchestrator ao-170 \(normal)")
+        XCTAssertFalse(result.hasSuffix("…"))
+    }
+
+    func testBubbleTextTruncatesPathologicallyLongMessages() {
+        // Cap is the runaway-input guard. A 1000-char message still
+        // needs to truncate to keep the bounding-rect calc bounded.
+        let runaway = String(repeating: "x", count: 1000)
+        let result = PetController.bubbleText(
+            message: runaway,
             projectName: "agent-orchestrator",
             sessionId: "ao-170"
         )
         XCTAssertTrue(result.hasPrefix("agent-orchestrator ao-170 "))
         XCTAssertTrue(result.hasSuffix("…"))
-        // Total bubble text is bounded by the char budget (60).
-        XCTAssertLessThanOrEqual(result.count, 60)
+        XCTAssertLessThanOrEqual(result.count, 250)
         // Project name and session id survive untouched.
         XCTAssertTrue(result.contains("agent-orchestrator"))
         XCTAssertTrue(result.contains("ao-170"))
+    }
+
+    // MARK: - Bubble auto-grow
+
+    func testThoughtBubblePreferredHeightShortText() {
+        let bubble = ThoughtBubbleView(frame: NSRect(x: 0, y: 0, width: 224, height: 52))
+        bubble.text = "PR #5 opened"
+        let h = bubble.preferredHeight(forWidth: 224)
+        // One line of 13pt body fits under the default min height.
+        XCTAssertGreaterThan(h, 0)
+        XCTAssertLessThanOrEqual(h, PetView.minBubbleHeight)
+    }
+
+    func testThoughtBubblePreferredHeightLongTextGrowsBeyondMin() {
+        let bubble = ThoughtBubbleView(frame: NSRect(x: 0, y: 0, width: 224, height: 52))
+        bubble.text = String(repeating: "wrap me ", count: 30)  // ~240 chars
+        let h = bubble.preferredHeight(forWidth: 224)
+        // A 240-char message must wrap past the single-bubble min so
+        // the auto-grow path is exercised in production.
+        XCTAssertGreaterThan(h, PetView.minBubbleHeight)
+    }
+
+    func testPetViewPreferredSizeClampedToMaxForRunawayMessage() {
+        // Even a pathologically long string must not push the view
+        // taller than `maxBubbleHeight + sprite + margins`.
+        let bubble = ThoughtBubbleView(frame: NSRect(x: 0, y: 0, width: 224, height: 52))
+        let huge = String(repeating: "x ", count: 5000)
+        let (bubbleHeight, total) = PetView.preferredSize(forText: huge, bubble: bubble)
+        XCTAssertEqual(bubbleHeight, PetView.maxBubbleHeight)
+        let expectedMaxTotal = PetView.maxBubbleHeight + 64 + 16  // sprite + 2*margin
+        XCTAssertEqual(total.height, expectedMaxTotal)
+    }
+
+    func testPetViewPreferredSizeStaysAtMinForShortMessage() {
+        let bubble = ThoughtBubbleView(frame: NSRect(x: 0, y: 0, width: 224, height: 52))
+        let (bubbleHeight, total) = PetView.preferredSize(forText: "hi", bubble: bubble)
+        XCTAssertEqual(bubbleHeight, PetView.minBubbleHeight)
+        XCTAssertEqual(total, PetView.totalSize)
     }
 }
