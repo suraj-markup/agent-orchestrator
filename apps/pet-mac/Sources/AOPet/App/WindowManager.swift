@@ -1,13 +1,14 @@
 import AppKit
 
-/// Top-level coordinator: spins up one PetController per project, removes
-/// controllers for projects that no longer have sessions, and routes socket
-/// events to the right pet.
+/// Top-level coordinator for the single global pet. Owns one PetController
+/// (created on demand once any session exists), routes socket events to
+/// it, and labels event bubbles with the originating project name from
+/// the latest poller snapshot.
 final class WindowManager {
-    private var controllers: [String: PetController] = [:]
-    private var orderedProjects: [String] = []
+    private var controller: PetController?
     private var currentSpriteName: String
     private var spriteSet: SpriteSet
+    private var projectNames: [String: String] = [:]
     private static let defaultsKey = "pet.spriteSet"
 
     init() {
@@ -26,63 +27,49 @@ final class WindowManager {
             // set — but provide an empty placeholder so the app still launches.
             spriteSet = SpriteSet(name: "empty", frames: [:])
         }
+
+        // One-launch nudge: if the user previously parked a per-project
+        // pet, carry that position over to the global slot so the
+        // refactor doesn't relocate them to the default top-right.
+        PositionStore.migrateLegacyToGlobal()
     }
 
     // MARK: - Reconcile
 
-    /// Diff the current set of controllers against the latest project states
-    /// and add / update / remove controllers to match.
-    func reconcile(with projects: [StateAggregator.ProjectState]) {
-        let visible = projects.filter { $0.mood != .hidden }
-        let visibleIds = Set(visible.map { $0.projectId })
+    /// Show / hide / update the single pet to match the current
+    /// instance-wide state. The pet hides when no sessions exist
+    /// anywhere or when the user has explicitly hidden it.
+    func reconcile(state: StateAggregator.InstanceState, projectNames: [String: String]) {
+        self.projectNames = projectNames
 
-        for projectId in controllers.keys where !visibleIds.contains(projectId) {
-            controllers.removeValue(forKey: projectId)?.close()
+        let userHidden = PositionStore.isHidden(PositionStore.globalKey)
+        let shouldShow = state.hasSessions && !userHidden
+
+        if !shouldShow {
+            controller?.close()
+            controller = nil
+            return
         }
 
-        for project in visible {
-            if PositionStore.isHidden(project.projectId) {
-                controllers.removeValue(forKey: project.projectId)?.close()
-                continue
+        if controller == nil {
+            let c = PetController(spriteSet: spriteSet)
+            c.onHide = { [weak self] in
+                self?.controller?.close()
+                self?.controller = nil
             }
-            if let existing = controllers[project.projectId] {
-                existing.updateName(project.projectName)
-                existing.updateMood(project.mood)
-            } else {
-                let controller = PetController(
-                    projectId: project.projectId,
-                    projectName: project.projectName,
-                    spriteSet: spriteSet
-                )
-                controller.updateMood(project.mood)
-                controller.onHide = { [weak self, weak controller] in
-                    guard let self = self, let c = controller else { return }
-                    self.controllers.removeValue(forKey: c.projectId)?.close()
-                }
-                controller.onSwitchSprite = { [weak self] in self?.cycleSprite() }
-                controllers[project.projectId] = controller
-            }
+            c.onSwitchSprite = { [weak self] in self?.cycleSprite() }
+            controller = c
         }
 
-        relayout(visibleProjects: visible)
-    }
+        guard let controller = controller else { return }
+        controller.updateMood(state.mood)
 
-    private func relayout(visibleProjects: [StateAggregator.ProjectState]) {
-        guard let screen = NSScreen.main else { return }
-        // Stable ordering by projectName so windows don't jump around as
-        // sessions come and go.
-        let ordered = visibleProjects
-            .map { $0.projectId }
-            .filter { controllers[$0] != nil }
-        orderedProjects = ordered
-        for (idx, projectId) in ordered.enumerated() {
-            guard let controller = controllers[projectId] else { continue }
+        if let screen = NSScreen.main {
             let fallback = WindowLayout.origin(
-                forIndex: idx,
+                forIndex: 0,
                 size: PetView.totalSize,
                 in: screen
             )
-            controller.layoutIndex = idx
             controller.show(at: fallback)
         }
     }
@@ -90,16 +77,8 @@ final class WindowManager {
     // MARK: - Event routing
 
     func deliver(event envelope: SocketEnvelope) {
-        if let projectId = envelope.event.projectId,
-           let controller = controllers[projectId] {
-            controller.handleEvent(envelope.event)
-            return
-        }
-        // No projectId, or no matching pet — broadcast so the user still
-        // sees the event somewhere.
-        for controller in controllers.values {
-            controller.handleEvent(envelope.event)
-        }
+        let projectName: String? = envelope.event.projectId.flatMap { projectNames[$0] }
+        controller?.handleEvent(envelope.event, projectName: projectName)
     }
 
     // MARK: - Sprite switching
@@ -114,8 +93,6 @@ final class WindowManager {
         currentSpriteName = nextName
         spriteSet = next
         UserDefaults.standard.set(nextName, forKey: WindowManager.defaultsKey)
-        for controller in controllers.values {
-            controller.updateSpriteSet(next)
-        }
+        controller?.updateSpriteSet(next)
     }
 }

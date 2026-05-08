@@ -8,7 +8,7 @@ enum PetMood: String, CaseIterable, Equatable {
     case working        // someone is actively working / typing
     case sad            // ci_failed / stuck / blocked
     case alert          // waiting_input — needs human now
-    case hidden         // no sessions for project
+    case hidden         // no sessions running anywhere — pet is hidden
 
     /// Higher = more attention-needing. Used by the worst-state picker.
     var priority: Int {
@@ -37,7 +37,9 @@ enum PetMood: String, CaseIterable, Equatable {
     }
 }
 
-/// Group sessions by projectId and pick the most-attention mood per project.
+/// Collapses every session AO is tracking into a single instance-wide
+/// mood. The pet is one global window now (not per-project), so we pick
+/// the worst mood across all sessions across all projects.
 enum StateAggregator {
     /// Map a single session to the mood it would induce on its own.
     /// Status takes priority over activity for the "alert/sad/happy" buckets;
@@ -79,38 +81,27 @@ enum StateAggregator {
         return .sleeping
     }
 
-    /// Per-project aggregated state: project name + worst mood + session count.
-    struct ProjectState: Equatable {
-        let projectId: String
-        let projectName: String
+    /// Single global state: worst mood across every session AO knows
+    /// about, plus the total session count so the WindowManager can
+    /// decide whether to show the pet at all.
+    struct InstanceState: Equatable {
         let mood: PetMood
-        let sessionCount: Int
+        let totalSessions: Int
+
+        /// True when AO has any sessions running. The pet hides itself
+        /// when this is false.
+        var hasSessions: Bool { totalSessions > 0 }
     }
 
-    /// Aggregate the full sessions list into one ProjectState per project that
-    /// has at least one session. Project names come from the orchestrator map;
-    /// projects with no orchestrator fall back to their projectId.
-    static func aggregate(
-        sessions: [WireSession],
-        projectNames: [String: String]
-    ) -> [ProjectState] {
-        var byProject: [String: [WireSession]] = [:]
-        for s in sessions {
-            byProject[s.projectId, default: []].append(s)
+    /// Collapse every session into one InstanceState. Empty input maps
+    /// to `.hidden` with `totalSessions = 0`.
+    static func aggregateGlobal(sessions: [WireSession]) -> InstanceState {
+        if sessions.isEmpty {
+            return InstanceState(mood: .hidden, totalSessions: 0)
         }
-
-        return byProject
-            .map { projectId, group -> ProjectState in
-                let worst = group
-                    .map { mood(for: $0) }
-                    .max(by: { $0.priority < $1.priority }) ?? .sleeping
-                return ProjectState(
-                    projectId: projectId,
-                    projectName: projectNames[projectId] ?? projectId,
-                    mood: worst,
-                    sessionCount: group.count
-                )
-            }
-            .sorted { $0.projectName < $1.projectName }
+        let worst = sessions
+            .map { mood(for: $0) }
+            .max(by: { $0.priority < $1.priority }) ?? .sleeping
+        return InstanceState(mood: worst, totalSessions: sessions.count)
     }
 }

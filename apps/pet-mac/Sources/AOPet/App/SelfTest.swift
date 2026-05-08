@@ -102,33 +102,53 @@ enum SelfTest {
         assertEqual(StateAggregator.mood(for: session("s","p", .idle, .idle)), .sleeping, "idle → sleeping")
         assertEqual(StateAggregator.mood(for: session("s","p", .done)), .sleeping, "done → sleeping")
 
-        let mixed = StateAggregator.aggregate(sessions: [
-            session("a","p1", .working, .active),
-            session("b","p1", .prOpen, .idle),
-            session("c","p1", .needsInput, .waitingInput)
-        ], projectNames: ["p1": "Proj"])
-        assertEqual(mixed.count, 1, "mixed grouping count")
-        assertEqual(mixed[0].mood, .alert, "mixed worst-state pick")
-        assertEqual(mixed[0].sessionCount, 3, "mixed session count")
-        assertEqual(mixed[0].projectName, "Proj", "mixed project name")
+        // ── Global aggregator ────────────────────────────────────────────
+        // The pet is one global window now — every session collapses to
+        // one InstanceState whose mood is the worst across all projects.
+        let emptyState = StateAggregator.aggregateGlobal(sessions: [])
+        assertEqual(emptyState.mood, .hidden, "empty global mood")
+        assertEqual(emptyState.totalSessions, 0, "empty global totalSessions")
+        assertTrue(emptyState.hasSessions == false, "empty global hasSessions=false")
 
-        let twoProj = StateAggregator.aggregate(sessions: [
+        let threeProjects = StateAggregator.aggregateGlobal(sessions: [
             session("a","p1", .working, .active),
-            session("b","p1", .working, .active),
-            session("c","p2", .done)
-        ], projectNames: ["p1": "Alpha", "p2": "Beta"])
-        assertEqual(twoProj.count, 2, "two-project count")
-        assertEqual(twoProj.map { $0.projectName }, ["Alpha", "Beta"], "two-project sort by name")
-        assertEqual(twoProj[0].mood, .working, "two-project first mood")
-        assertEqual(twoProj[1].mood, .sleeping, "two-project second mood")
+            session("b","p2", .prOpen, .idle),
+            session("c","p3", .ciFailed, .ready),
+            session("d","p1", .needsInput, .waitingInput),
+        ])
+        assertEqual(threeProjects.mood, .alert, "3-project worst-state pick")
+        assertEqual(threeProjects.totalSessions, 4, "3-project total session count")
 
-        let fallback = StateAggregator.aggregate(
-            sessions: [session("a","no-orch", .working, .active)],
-            projectNames: [:]
+        let allIdle = StateAggregator.aggregateGlobal(sessions: [
+            session("a","p1", .idle, .idle),
+            session("b","p2", .done),
+            session("c","p3", .done),
+        ])
+        assertEqual(allIdle.mood, .sleeping, "all-idle global mood")
+        assertEqual(allIdle.totalSessions, 3, "all-idle total")
+
+        // ── Bubble label ─────────────────────────────────────────────────
+        // Single-pet UI prefixes event bubbles with `[projectName]` so
+        // the user can tell which project an event came from. Long names
+        // get truncated to 16 chars + ellipsis.
+        assertEqual(
+            PetController.bubbleText(message: "PR #5 opened", projectName: nil),
+            "PR #5 opened",
+            "bubble: nil project name"
         )
-        assertEqual(fallback[0].projectName, "no-orch", "projectId fallback name")
-
-        assertEqual(StateAggregator.aggregate(sessions: [], projectNames: [:]).count, 0, "empty input → empty")
+        assertEqual(
+            PetController.bubbleText(message: "PR #5 opened", projectName: "ao"),
+            "[ao] PR #5 opened",
+            "bubble: short project name"
+        )
+        assertEqual(
+            PetController.bubbleText(
+                message: "PR #5 opened",
+                projectName: "agent-orchestrator-monorepo-internal"
+            ),
+            "[agent-orchestrat…] PR #5 opened",
+            "bubble: truncated long project name"
+        )
 
         assertTrue(PetMood.sleeping.priority < PetMood.happy.priority, "sleeping<happy")
         assertTrue(PetMood.happy.priority < PetMood.working.priority, "happy<working")

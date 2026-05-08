@@ -1,10 +1,13 @@
 # AOPet — macOS pet overlay for Agent Orchestrator
 
 A small native macOS companion that sits on top of your other windows and
-reflects the state of the AI agents Agent Orchestrator (AO) is running. One
-pet per project: as sessions move through `working → pr_open → merged`, the
-pet's animation changes; when an agent needs your attention it bounces, flashes
-or shows a thought bubble.
+reflects the state of the AI agents Agent Orchestrator (AO) is running.
+One pet for the whole AO instance: as sessions move through
+`working → pr_open → merged`, the pet's animation changes; when an agent
+needs your attention it bounces, flashes or shows a thought bubble. When
+several projects are active the pet shows the worst-state mood across
+all of them, and event bubbles are prefixed with the originating
+project name (e.g. `[agent-orch…] PR #5 merged`).
 
 Inspired by Codex Pets.
 
@@ -80,29 +83,31 @@ Both paths cover:
 
 Two concurrent inputs drive the pet:
 
-| Source       | Cadence    | Used for                          |
-| ------------ | ---------- | --------------------------------- |
-| HTTP poll    | 5s         | Steady-state mood per project     |
-| Unix socket  | event-driven | One-shot reactions + bubbles    |
+| Source       | Cadence      | Used for                            |
+| ------------ | ------------ | ----------------------------------- |
+| HTTP poll    | 5s           | Steady-state mood for the instance  |
+| Unix socket  | event-driven | One-shot reactions + bubbles        |
 
 #### Steady state — `GET http://localhost:3001/api/sessions`
 
 The dashboard returns a JSON object with a `sessions` array (each carrying
-`id`, `projectId`, `status`, `activity`) and an `orchestrators` array (each
-carrying `projectId` and `projectName`). AOPet groups sessions by `projectId`,
-picks the highest-priority mood for each project, and renders one window per
-project that has at least one session.
+`id`, `projectId`, `status`, `activity`) and an `orchestrators` array
+(each carrying `projectId` and `projectName`). AOPet collapses every
+session into a single `InstanceState` whose mood is the worst across all
+projects, and renders **one** window for the whole AO instance. Project
+names are kept around so that socket event bubbles can be labelled with
+the originating project.
 
-State → mood mapping (worst wins):
+State → mood mapping (worst wins, across all projects):
 
 | Trigger                                          | Mood       | Visual                          |
 | ------------------------------------------------ | ---------- | ------------------------------- |
 | any session `waiting_input` / `needs_input`      | `alert`    | Wide eyes + red clock bubble    |
 | any session `ci_failed`/`stuck`/`blocked`/`errored` | `sad`   | Frown + red exclamation         |
-| any session `pr_open`/`approved`/`mergeable`     | `happy`    | Smile + green checkmark         |
+| any session `pr_open`/`approved`/`mergeable`/`merged` | `happy` | Smile + green checkmark      |
 | any session actively working                     | `working`  | Walking / typing animation      |
-| all sessions idle/done/merged/unknown            | `sleeping` | Closed eyes + floating Z        |
-| no sessions for project                          | (hidden)   | Window removed                  |
+| all sessions idle/done/unknown                   | `sleeping` | Closed eyes + floating Z        |
+| no sessions anywhere                             | (hidden)   | Window removed                  |
 
 Future status / activity values not in the contract decode as `unknown` and
 fall through to `sleeping` rather than crashing.
@@ -141,8 +146,10 @@ Wire-contract notes:
   envelope per line. Empty lines are skipped.
 - Only `kind == "event"` envelopes are surfaced; other kinds are silently
   ignored to leave room for future framing.
-- `sessionId`, `projectId`, `timestamp`, and `actions` are optional. Events
-  with no `projectId` are broadcast to every visible pet.
+- `sessionId`, `projectId`, `timestamp`, and `actions` are optional.
+  Events with no `projectId` render with no `[…]` prefix on the bubble.
+  Events with a `projectId` get the project's display name from the
+  latest poller snapshot, truncated to 16 chars (e.g. `[agent-orch…]`).
 - Unknown `priority` values decode as `unknown` and render with the default
   info treatment (small bounce, neutral bubble).
 
@@ -157,7 +164,7 @@ Reaction by priority:
 
 ### Window behaviour
 
-Each pet window is a borderless `NSWindow` configured as:
+The pet is a single borderless `NSWindow` configured as:
 
 - `level = .floating` (always-on-top)
 - `collectionBehavior = [.canJoinAllSpaces, .stationary]` (visible across all
@@ -165,15 +172,23 @@ Each pet window is a borderless `NSWindow` configured as:
 - `ignoresMouseEvents = false` so right-click and drag work
 - `isMovableByWindowBackground = true` — drag the pet to reposition
 
-Windows are auto-tiled in the top-right of the main screen's visible frame
-when first created, and per-project positions are persisted to UserDefaults
-(`pet.position.<projectId>`) so they reopen where you left them.
+The window appears in the top-right of the main screen's visible frame
+on first launch and persists its position to UserDefaults under
+`pet.position.aopet.global`. The hidden flag lives at
+`pet.hidden.aopet.global`. The window is removed entirely when AO has no
+sessions running anywhere.
+
+If a previous version persisted per-project positions
+(`pet.position.<projectId>`), the first launch of the single-pet build
+copies the most recent one over to the global key so users don't lose
+where they parked the pet.
 
 ### Right-click menu
 
-- **Hide _project_ pet** — closes this pet and remembers the choice
-  (`pet.hidden.<projectId>` in UserDefaults). Re-enable by clearing the
-  default or running `defaults delete dev.composio.aopet pet.hidden.<id>`.
+- **Hide pet** — closes the pet and remembers the choice
+  (`pet.hidden.aopet.global`). Re-enable with
+  `defaults write dev.composio.aopet pet.hidden.aopet.global -bool false`
+  (or just delete the key).
 - **Switch sprite** — cycles through bundled sprite sets (currently only
   `oneko`; drop additional directories under `Resources/sprites/` to add
   variants). Choice persists across launches.
