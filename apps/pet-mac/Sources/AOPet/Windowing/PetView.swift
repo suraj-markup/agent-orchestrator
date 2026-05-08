@@ -3,11 +3,20 @@ import AppKit
 /// The visible pet: sprite at the bottom, thought bubble at the top.
 /// Forwards right-clicks to a delegate-provided NSMenu.
 final class PetView: NSView {
+    /// Default view size (matches `minBubbleHeight`). The view grows
+    /// taller when a long bubble needs more room — see
+    /// `preferredSize(forText:)`.
     static let totalSize = NSSize(width: 240, height: 132)
+    /// The width of the view never changes; only the height varies.
+    static let fixedWidth: CGFloat = 240
     private static let spriteSize = NSSize(width: 64, height: 64)
-    /// Tall enough to comfortably fit two lines of 13pt text.
-    private static let bubbleHeight: CGFloat = 52
-    private static let edgeMargin: CGFloat = 8
+    /// Default bubble height — fits two lines of 13pt text comfortably.
+    /// Bubble can grow up to `maxBubbleHeight` to fit wrapped text.
+    static let minBubbleHeight: CGFloat = 52
+    /// Hard ceiling so a runaway message can't push the window off
+    /// screen. ~8 lines at 13pt body is plenty.
+    static let maxBubbleHeight: CGFloat = 120
+    static let edgeMargin: CGFloat = 8
 
     private let imageView = DraggableImageView(frame: .zero)
     let bubble = ThoughtBubbleView(frame: .zero)
@@ -22,6 +31,12 @@ final class PetView: NSView {
     /// Lazily provided by the controller — we ask for it on each right-click
     /// so menu items can reflect current state (project name, sprite name).
     var menuProvider: (() -> NSMenu?)?
+
+    /// Notifies the controller that the view wants a new total size
+    /// (driven by bubble auto-grow). The controller resizes the
+    /// `PetWindow` so the bottom edge stays planted (sprite doesn't
+    /// jump) and the bubble grows upward.
+    var onPreferredSizeChange: ((NSSize) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -39,31 +54,36 @@ final class PetView: NSView {
 
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.imageAlignment = .alignCenter
-        // Sprite sits flush bottom-right with an 8pt margin.
+        imageView.autoresizingMask = [.minXMargin, .maxYMargin]
+        addSubview(imageView)
+
+        bubble.autoresizingMask = [.maxXMargin, .minYMargin]
+        bubble.isHidden = true
+        addSubview(bubble)
+
+        overlayView.autoresizingMask = [.minXMargin, .minYMargin]
+        overlayView.isHidden = true
+        addSubview(overlayView)
+
+        relayout(bubbleHeight: PetView.minBubbleHeight)
+    }
+
+    /// Place subviews against the current `bounds` for a given bubble
+    /// height. Sprite stays flush bottom-right; bubble takes the full
+    /// top row; overlay sits on the upper-right corner of the sprite.
+    private func relayout(bubbleHeight: CGFloat) {
+        bubble.frame = NSRect(
+            x: PetView.edgeMargin,
+            y: bounds.height - bubbleHeight - PetView.edgeMargin,
+            width: bounds.width - PetView.edgeMargin * 2,
+            height: bubbleHeight
+        )
         imageView.frame = NSRect(
             x: bounds.width - PetView.spriteSize.width - PetView.edgeMargin,
             y: PetView.edgeMargin,
             width: PetView.spriteSize.width,
             height: PetView.spriteSize.height
         )
-        imageView.autoresizingMask = [.minXMargin, .maxYMargin]
-        addSubview(imageView)
-
-        // Bubble takes the full top row width minus 8pt margins on
-        // each side so longer messages have room to wrap to two lines.
-        bubble.frame = NSRect(
-            x: PetView.edgeMargin,
-            y: bounds.height - PetView.bubbleHeight - PetView.edgeMargin,
-            width: bounds.width - PetView.edgeMargin * 2,
-            height: PetView.bubbleHeight
-        )
-        bubble.autoresizingMask = [.maxXMargin, .minYMargin]
-        bubble.isHidden = true
-        addSubview(bubble)
-
-        // Overlay badge sits on the upper-right corner of the sprite —
-        // a small disc with a glyph (! for sad, ✓ for happy). Hidden by
-        // default; the controller toggles it via setOverlay.
         let overlaySide: CGFloat = 18
         overlayView.frame = NSRect(
             x: imageView.frame.maxX - overlaySide + 2,
@@ -71,9 +91,26 @@ final class PetView: NSView {
             width: overlaySide,
             height: overlaySide
         )
-        overlayView.autoresizingMask = [.minXMargin, .minYMargin]
-        overlayView.isHidden = true
-        addSubview(overlayView)
+    }
+
+    /// Compute a (bubbleHeight, totalSize) pair that fits `text`,
+    /// clamped to the [`minBubbleHeight`, `maxBubbleHeight`] range.
+    /// Pure (no side effects) so tests can call it directly.
+    static func preferredSize(forText text: String?, bubble: ThoughtBubbleView) -> (bubbleHeight: CGFloat, total: NSSize) {
+        let bubbleWidth = fixedWidth - edgeMargin * 2
+        let measured: CGFloat
+        if let text = text, !text.isEmpty {
+            bubble.text = text
+            measured = bubble.preferredHeight(forWidth: bubbleWidth)
+        } else {
+            measured = minBubbleHeight
+        }
+        let bubbleHeight = min(max(ceil(measured), minBubbleHeight), maxBubbleHeight)
+        let total = NSSize(
+            width: fixedWidth,
+            height: bubbleHeight + spriteSize.height + edgeMargin * 2
+        )
+        return (bubbleHeight, total)
     }
 
     func setOverlay(_ kind: MoodOverlayView.Kind?) {
@@ -89,15 +126,33 @@ final class PetView: NSView {
     func showBubble(text: String, tint: NSColor, durationSeconds: TimeInterval) {
         bubble.text = text
         bubble.tint = tint
+
+        // Measure → resize the window → relayout against the new
+        // bounds. Order matters: the controller must change the window
+        // frame *before* we redraw subviews, otherwise the bubble's
+        // computed Y is based on stale bounds.
+        let (bubbleHeight, total) = PetView.preferredSize(forText: text, bubble: bubble)
+        onPreferredSizeChange?(total)
+        relayout(bubbleHeight: bubbleHeight)
+
         bubble.isHidden = false
-        // Auto-hide after the duration unless replaced.
         bubble.layer?.removeAllAnimations()
+
         let token = UUID()
         bubbleToken = token
         DispatchQueue.main.asyncAfter(deadline: .now() + durationSeconds) { [weak self] in
             guard let self = self, self.bubbleToken == token else { return }
             self.bubble.isHidden = true
             self.bubble.text = nil
+            // Shrink back to the default size when the bubble fades.
+            let minTotal = NSSize(
+                width: PetView.fixedWidth,
+                height: PetView.minBubbleHeight
+                    + PetView.spriteSize.height
+                    + PetView.edgeMargin * 2
+            )
+            self.onPreferredSizeChange?(minTotal)
+            self.relayout(bubbleHeight: PetView.minBubbleHeight)
         }
     }
     private var bubbleToken: UUID?

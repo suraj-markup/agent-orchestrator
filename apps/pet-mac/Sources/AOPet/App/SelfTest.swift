@@ -185,18 +185,63 @@ enum SelfTest {
             "ao-170 PR #5 opened",
             "bubble: session only"
         )
-        let longMessage = String(repeating: "x", count: 200)
+        // Realistic-length messages now round-trip in full — the
+        // bubble wraps visually instead of pre-truncating.
+        let normalMessage = "Session ao-170 needs your approval to merge the pull request"
+        let normalResult = PetController.bubbleText(
+            message: normalMessage,
+            projectName: "agent-orchestrator",
+            sessionId: "ao-170"
+        )
+        assertEqual(
+            normalResult,
+            "agent-orchestrator ao-170 \(normalMessage)",
+            "bubble: normal message preserved in full"
+        )
+
+        // Pathologically long messages still get truncated — that's
+        // the runaway-input guard, not the visual cut.
+        let runaway = String(repeating: "x", count: 1000)
         let truncated = PetController.bubbleText(
-            message: longMessage,
+            message: runaway,
             projectName: "agent-orchestrator",
             sessionId: "ao-170"
         )
         assertTrue(
             truncated.hasPrefix("agent-orchestrator ao-170 "),
-            "bubble: identifiers survive truncation"
+            "bubble: identifiers survive runaway truncation"
         )
-        assertTrue(truncated.hasSuffix("…"), "bubble: truncated with ellipsis")
-        assertTrue(truncated.count <= 60, "bubble: total within budget")
+        assertTrue(truncated.hasSuffix("…"), "bubble: runaway truncated with ellipsis")
+        assertTrue(truncated.count <= 250, "bubble: runaway within budget")
+
+        // ── Bubble auto-grow ────────────────────────────────────────────
+        // ThoughtBubbleView measures wrapped text height; PetView
+        // clamps to [min, max] and tells the controller to resize the
+        // window upward.
+        do {
+            let bubble = ThoughtBubbleView(frame: NSRect(x: 0, y: 0, width: 224, height: 52))
+            bubble.text = "PR #5 opened"
+            let h = bubble.preferredHeight(forWidth: 224)
+            assertTrue(h > 0,                                   "preferredHeight: short non-zero")
+            assertTrue(h <= PetView.minBubbleHeight,            "preferredHeight: short ≤ min")
+
+            bubble.text = String(repeating: "wrap me ", count: 30)
+            let bigH = bubble.preferredHeight(forWidth: 224)
+            assertTrue(bigH > PetView.minBubbleHeight,          "preferredHeight: long > min")
+
+            let huge = String(repeating: "x ", count: 5000)
+            let (clamped, total) = PetView.preferredSize(forText: huge, bubble: bubble)
+            assertEqual(clamped, PetView.maxBubbleHeight,       "preferredSize: clamp at max")
+            assertEqual(
+                total.height,
+                PetView.maxBubbleHeight + 64 + 16,
+                "preferredSize: total uses max + sprite + margins"
+            )
+
+            let (minBH, minTotal) = PetView.preferredSize(forText: "hi", bubble: bubble)
+            assertEqual(minBH, PetView.minBubbleHeight, "preferredSize: short = min")
+            assertEqual(minTotal, PetView.totalSize,    "preferredSize: short = totalSize")
+        }
 
         assertTrue(PetMood.sleeping.priority < PetMood.happy.priority, "sleeping<happy")
         assertTrue(PetMood.happy.priority < PetMood.working.priority, "happy<working")

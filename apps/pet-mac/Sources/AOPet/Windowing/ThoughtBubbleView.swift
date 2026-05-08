@@ -1,6 +1,8 @@
 import AppKit
 
-/// Rounded-rect speech bubble drawn above the pet. Hidden when `text` is nil.
+/// Rounded-rect speech bubble drawn above the pet. Hidden when `text`
+/// is nil. Wraps long text on word boundaries; callers measure
+/// preferredHeight(forWidth:) to grow the containing window.
 final class ThoughtBubbleView: NSView {
     var text: String? {
         didSet { needsDisplay = true }
@@ -29,22 +31,54 @@ final class ThoughtBubbleView: NSView {
         path.lineWidth = 1
         path.stroke()
 
-        // 13pt matches macOS body text. The bubble is sized to fit two
-        // lines, and `truncatesLastVisibleLine` clips anything beyond
-        // that with the system ellipsis.
+        let textRect = bounds.insetBy(
+            dx: inset + Self.textInset,
+            dy: inset + Self.textInsetY
+        )
+        (text as NSString).draw(
+            with: textRect,
+            options: Self.drawOptions,
+            attributes: Self.textAttributes
+        )
+    }
+
+    /// Rendered text height for `width`. Includes the same insets
+    /// `draw(_:)` uses so the measurement and the rendered output agree
+    /// — callers can plug the result straight into the bubble frame
+    /// height. Returns 0 for empty / nil text.
+    func preferredHeight(forWidth width: CGFloat) -> CGFloat {
+        guard let text = text, !text.isEmpty else { return 0 }
+        let inset: CGFloat = 4
+        let usableWidth = max(0, width - (inset + Self.textInset) * 2)
+        let bounding = (text as NSString).boundingRect(
+            with: NSSize(width: usableWidth, height: .greatestFiniteMagnitude),
+            options: Self.drawOptions,
+            attributes: Self.textAttributes
+        )
+        return ceil(bounding.height) + (inset + Self.textInsetY) * 2
+    }
+
+    // MARK: - Shared text style
+
+    /// 13pt matches macOS body text. Wrap on word boundaries; the
+    /// caller's max-height clamp is the only safety net for runaway
+    /// strings (`.truncatesLastVisibleLine` is intentionally absent —
+    /// we want long messages to read in full when they fit).
+    private static let textAttributes: [NSAttributedString.Key: Any] = {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingTail
+        paragraph.lineBreakMode = .byWordWrapping
         paragraph.alignment = .left
-        let attrs: [NSAttributedString.Key: Any] = [
+        return [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium),
             .foregroundColor: NSColor.black,
             .paragraphStyle: paragraph,
         ]
-        let textRect = bounds.insetBy(dx: inset + 6, dy: inset + 4)
-        (text as NSString).draw(
-            with: textRect,
-            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-            attributes: attrs
-        )
-    }
+    }()
+
+    private static let drawOptions: NSString.DrawingOptions = [
+        .usesLineFragmentOrigin,
+    ]
+
+    private static let textInset: CGFloat = 6
+    private static let textInsetY: CGFloat = 4
 }
