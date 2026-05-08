@@ -19,36 +19,33 @@ final class WindowManagerTests: XCTestCase {
         super.tearDown()
     }
 
-    func testAvailableSetsHasAllThreeSprites() {
-        // Without these three the cycle below has nothing to cycle.
-        XCTAssertEqual(SpriteLoader.availableSets, ["oneko", "cat", "dog"])
+    func testAvailableSetsHasTwoRealAnimals() {
+        // Two genuinely different animals — see SpriteLoader docs +
+        // NOTICE for licensing provenance.
+        XCTAssertEqual(SpriteLoader.availableSets, ["oneko", "dog"])
     }
 
-    func testCycleSpriteRotatesOnekoCatDogOneko() {
+    func testCycleSpriteRotatesOnekoDogOneko() {
         let manager = WindowManager(defaults: defaults)
 
         let first = manager.cycleSprite()
-        XCTAssertEqual(first, "cat")
-        XCTAssertEqual(manager.currentSpriteName, "cat")
-
-        let second = manager.cycleSprite()
-        XCTAssertEqual(second, "dog")
+        XCTAssertEqual(first, "dog")
         XCTAssertEqual(manager.currentSpriteName, "dog")
 
-        let third = manager.cycleSprite()
-        XCTAssertEqual(third, "oneko")
+        let second = manager.cycleSprite()
+        XCTAssertEqual(second, "oneko")
         XCTAssertEqual(manager.currentSpriteName, "oneko")
     }
 
     func testCycleSpritePersistsToUserDefaults() {
         let manager = WindowManager(defaults: defaults)
-        _ = manager.cycleSprite() // → cat
-        XCTAssertEqual(defaults.string(forKey: "pet.spriteSet"), "cat")
+        _ = manager.cycleSprite() // → dog
+        XCTAssertEqual(defaults.string(forKey: "pet.spriteSet"), "dog")
 
         // A fresh WindowManager backed by the same defaults must
         // resume on the persisted set.
         let resumed = WindowManager(defaults: defaults)
-        XCTAssertEqual(resumed.currentSpriteName, "cat")
+        XCTAssertEqual(resumed.currentSpriteName, "dog")
     }
 
     func testEachAvailableSetLoadsAndCoversAllAnimatedMoods() {

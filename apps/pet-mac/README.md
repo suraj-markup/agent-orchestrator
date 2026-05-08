@@ -189,9 +189,8 @@ where they parked the pet.
   (`pet.hidden.aopet.global`). Re-enable with
   `defaults write dev.composio.aopet pet.hidden.aopet.global -bool false`
   (or just delete the key).
-- **Switch sprite** — cycles through bundled sprite sets (currently only
-  `oneko`; drop additional directories under `Resources/sprites/` to add
-  variants). Choice persists across launches.
+- **Switch sprite** — cycles through bundled sprite sets (`oneko` and
+  `dog`; see "Sprites" below). Choice persists across launches.
 - **Quit AOPet** — terminates the app.
 
 ## Project layout
@@ -202,49 +201,73 @@ apps/pet-mac/
 ├── README.md
 ├── NOTICE                        # third-party asset attributions
 ├── scripts/
-│   └── generate_sprites.py       # crops oneko.gif → per-mood PNG frames
+│   └── generate_sprites.py       # fetches oneko.gif + dog XBMs → PNG frames
 ├── Sources/AOPet/
 │   ├── App/                      # main, AppDelegate, embedded self-test
 │   ├── Net/                      # HTTP poller, socket listener, one-shot logger
 │   ├── State/                    # wire models + aggregator
 │   ├── Sprites/                  # sprite loader / SpriteSet
 │   ├── Windowing/                # NSWindow, layout, NSView, controller, overlay
-│   └── Resources/sprites/oneko/{mood}_{frame}.png
+│   └── Resources/sprites/{oneko,dog}/{mood}_{frame}.png
 └── Tests/AOPetTests/             # XCTest target (requires Xcode)
 ```
 
 ## Sprites
 
-The bundled cat sprite is **Oneko** (Naoshi Ikeya, 1989), distributed by
-[adryd325/oneko.js](https://github.com/adryd325/oneko.js) under the MIT
-license. See [`NOTICE`](NOTICE) for full attribution and the upstream
-license text.
+AOPet ships **two real animals**, each from a different
+permissively-licensed upstream. The "Switch sprite" menu cycles
+between them; choice persists to UserDefaults.
 
-`scripts/generate_sprites.py` fetches the canonical 256×128 atlas
-(`oneko.gif`), crops the named frames per oneko.js's `spriteSets` table,
-and writes per-mood PNGs under `Resources/sprites/oneko/`. Re-run it
-whenever the upstream atlas changes — there is no build-time fetch.
+| Set     | Animal | Source                                                                                | License        |
+| ------- | ------ | ------------------------------------------------------------------------------------- | -------------- |
+| `oneko` | Cat    | [adryd325/oneko.js](https://github.com/adryd325/oneko.js) — `oneko.gif` 256×128 atlas | MIT            |
+| `dog`   | Dog    | [tie/oneko](https://github.com/tie/oneko) — `bitmaps/dog/*.xbm` from the original `xneko`/`oneko` Unix program | Public domain |
 
-### State → oneko frame mapping
+The dog sprite's PD provenance is corroborated by `mdonoughe/neko-mac`
+(Unlicense), which states it's "based off the public domain Oneko code."
+See [`NOTICE`](NOTICE) for full attribution and the upstream MIT license
+text.
 
-| AO mood    | Oneko frames                     | Frames | Cadence | Overlay  |
-| ---------- | -------------------------------- | ------ | ------- | -------- |
-| `working`  | walk-east (`E[0..1]`)            | 2      | 8 fps   | —        |
-| `alert`    | scratch-self (`scratchSelf[0..2]`)| 3      | ~6 fps  | —        |
-| `happy`    | `idle` ↔ `tired` (subtle blink)  | 2      | 2 fps   | green ✓  |
-| `sad`      | `alert` ↔ `idle` (stressed pose) | 2      | ~2.5 fps | red `!` |
-| `sleeping` | `sleeping[0..1]` (Z's)           | 2      | 1 fps   | —        |
+`scripts/generate_sprites.py` fetches both upstreams at asset-generation
+time:
+- For `oneko/`: crops the canonical atlas per oneko.js's `spriteSets`
+  table.
+- For `dog/`: parses each XBM (32×32, 1bpp, LSB-first), renders each
+  set bit as an opaque foreground pixel (RGB warm brown), and saves
+  per-mood PNG frames.
 
-The oneko sheet does not have a unique pose for "happy" or "sad"; those
-moods reuse the closest visual frame and rely on a small badge overlay
-drawn over the sprite (`MoodOverlayView`) for disambiguation. See
-`scripts/generate_sprites.py` `MOOD_TO_FRAMES` for the source of truth.
+Re-run the script whenever an upstream changes; there is no build-time
+fetch.
+
+A previous third "cat" slot was retired because we couldn't find a
+permissively-licensed (MIT/CC0/PD), frame-compatible third animal. Per
+the project's stated fallback, the slot was dropped rather than faked
+with a retint of oneko.
+
+### State → frame mapping
+
+Both sets share the same AO `PetMood` layout. Frame counts and cadence
+are identical so swapping sets at runtime doesn't affect animation
+timing.
+
+| AO mood    | oneko (MIT cat)                    | dog (PD)                       | Frames | Cadence  | Overlay |
+| ---------- | ---------------------------------- | ------------------------------ | ------ | -------- | ------- |
+| `working`  | walk-east (`E[0..1]`)              | walk-east (`right1`/`right2`)  | 2      | 8 fps    | —       |
+| `alert`    | scratch-self (`scratchSelf[0..2]`) | scratch (`kaki1`/`kaki2`/`jare2`) | 3   | ~6 fps   | —       |
+| `happy`    | `idle` ↔ `tired` (blink)           | `mati2` ↔ `mati3` (idle blink) | 2      | 2 fps    | green ✓ |
+| `sad`      | `alert` ↔ `idle` (stressed)        | `awake` ↔ `mati2` (surprised)  | 2      | ~2.5 fps | red `!` |
+| `sleeping` | `sleeping[0..1]` (Z's)             | `sleep1` ↔ `sleep2`            | 2      | 1 fps    | —       |
+
+Neither sheet has a unique pose for "happy" or "sad"; both reuse the
+closest visual frame and rely on the small disambiguating badge from
+`MoodOverlayView`. See `scripts/generate_sprites.py` `*_MOOD_TO_FRAMES`
+for the source of truth.
 
 The sprite loader upscales the 32×32 source frames to 64×64 with
 nearest-neighbor interpolation so the pixel art reads crisply on Retina
 displays. Adding a new sprite set is just a directory under
-`Resources/sprites/<setName>/` with `{mood}_{frame}.png` files — register
-the directory name in `SpriteLoader.availableSets`.
+`Resources/sprites/<setName>/` with `{mood}_{frame}.png` files —
+register the directory name in `SpriteLoader.availableSets`.
 
 ## Graceful degradation
 

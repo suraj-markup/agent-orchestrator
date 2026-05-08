@@ -30,12 +30,19 @@ struct SpriteSet: Equatable {
 
 enum SpriteLoader {
     /// Names of sprite sets shipped in the bundle, in the order the
-    /// "Switch sprite" menu cycles through them. All three are Oneko
-    /// frames retinted at generation time (cat = cooler grey, dog =
-    /// warm brown) so the cycle is visibly distinct without shipping
-    /// new artwork. Drop additional directories under
-    /// `Resources/sprites/` to add more variants.
-    static let availableSets: [String] = ["oneko", "cat", "dog"]
+    /// "Switch sprite" menu cycles through them. Two genuinely
+    /// different animals:
+    ///
+    ///   * `oneko` — MIT cat from adryd325/oneko.js
+    ///   * `dog`   — public-domain XBM frames from the original
+    ///                Masayuki Koba `oneko` Unix program (mirror at
+    ///                github.com/tie/oneko)
+    ///
+    /// A third "cat" slot was previously here as a retinted oneko —
+    /// dropped because we couldn't find a permissive, frame-compatible
+    /// third animal. See `scripts/generate_sprites.py` and `NOTICE`
+    /// for full provenance.
+    static let availableSets: [String] = ["oneko", "dog"]
 
     /// Frames are upscaled to this rendering size with nearest-neighbor so
     /// the pixel-art reads crisply on Retina displays. Matches PetView's

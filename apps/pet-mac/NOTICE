@@ -4,9 +4,16 @@ AOPet — third-party assets and licenses
 Sprite art
 ----------
 
-The cat sprite frames bundled under
-`Sources/AOPet/Resources/sprites/oneko/` are derived from the Oneko cat
-sprite atlas distributed by adryd325/oneko.js.
+AOPet ships two animal sprite sets, each derived from a different
+permissively-licensed upstream source. `scripts/generate_sprites.py`
+fetches both at asset-generation time; nothing is bundled at build
+time except the resulting PNG frames.
+
+### oneko (cat) — MIT
+
+Frames under `Sources/AOPet/Resources/sprites/oneko/` are cropped
+from the canonical Oneko cat sprite atlas distributed by
+adryd325/oneko.js.
 
   Source repo:  https://github.com/adryd325/oneko.js
   Source file:  oneko.gif (256x128 atlas, 8x4 grid of 32x32 frames)
@@ -14,16 +21,41 @@ sprite atlas distributed by adryd325/oneko.js.
 
 Original artwork: Oneko (Naoshi Ikeya, 1989).
 
-The atlas is fetched at build-asset-generation time by
-`scripts/generate_sprites.py`, cropped per the canonical oneko.js
-`spriteSets` table, and saved as per-mood PNG frames. No transformations
-beyond cropping are applied.
+### dog — public domain
 
-The full text of the oneko.js MIT license follows. A copy is preserved
-here so distributing AOPet does not require pulling adryd325/oneko.js as
-a build dependency.
+Frames under `Sources/AOPet/Resources/sprites/dog/` are rendered from
+the dog XBM bitmaps shipped by the original `xneko`/`oneko` Unix
+program. The program — and its bundled bitmaps — has been distributed
+as **public domain** for ~35 years. The provenance is corroborated
+explicitly by the Mac OS X port `mdonoughe/neko-mac`, whose README
+states:
+
+    "This is based off the public domain Oneko code."
+
+  Source repo:  https://github.com/tie/oneko (Git mirror of the
+                upstream xneko/oneko sources)
+  Source files: bitmaps/dog/*.xbm (32x32, 1bpp X11 bitmaps)
+  Authors:      "xneko" by Masayuki Koba; modified to "oneko" by
+                Tatsuya Kato; further modified by John Lerchey,
+                Eric Anderson, Toshihiro Kanda, Kiichiroh Mukose.
+  License:      Public domain (no explicit copyright header on the
+                source files; PD status corroborated by
+                mdonoughe/neko-mac, Unlicense).
+
+`generate_sprites.py` parses the XBM byte data, renders each set bit
+as an opaque foreground pixel (RGB warm brown so the dog reads as
+visually distinct from the white oneko cat), and writes per-mood PNG
+frames mapped onto AO's PetMood layout. No transformations beyond the
+1bpp → RGBA render are applied.
+
+A previous third "cat" slot was retired because we couldn't find a
+permissively-licensed (MIT/CC0/public-domain), frame-compatible third
+animal. Per the project's stated fallback, the third slot was dropped
+rather than faked with a retint of oneko.
 
 ---
+
+Full text of the oneko.js MIT license follows.
 
 MIT License
 
