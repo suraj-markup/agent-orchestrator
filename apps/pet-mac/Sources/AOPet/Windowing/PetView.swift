@@ -9,6 +9,7 @@ final class PetView: NSView {
 
     private let imageView = NSImageView(frame: .zero)
     let bubble = ThoughtBubbleView(frame: .zero)
+    private let overlayView = MoodOverlayView(frame: .zero)
 
     /// Lazily provided by the controller — we ask for it on each right-click
     /// so menu items can reflect current state (project name, sprite name).
@@ -48,6 +49,26 @@ final class PetView: NSView {
         bubble.autoresizingMask = [.maxXMargin, .minYMargin]
         bubble.isHidden = true
         addSubview(bubble)
+
+        // Overlay badge sits on the upper-right corner of the sprite —
+        // a small disc with a glyph (! for sad, ✓ for happy). Hidden by
+        // default; the controller toggles it via setOverlay.
+        let overlaySide: CGFloat = 18
+        overlayView.frame = NSRect(
+            x: imageView.frame.maxX - overlaySide + 2,
+            y: imageView.frame.maxY - overlaySide + 2,
+            width: overlaySide,
+            height: overlaySide
+        )
+        overlayView.autoresizingMask = [.minXMargin, .minYMargin]
+        overlayView.isHidden = true
+        addSubview(overlayView)
+    }
+
+    func setOverlay(_ kind: MoodOverlayView.Kind?) {
+        overlayView.kind = kind
+        overlayView.isHidden = (kind == nil)
+        overlayView.needsDisplay = true
     }
 
     func setImage(_ image: NSImage?) {

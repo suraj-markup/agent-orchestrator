@@ -21,6 +21,20 @@ enum PetMood: String, CaseIterable, Equatable {
         case .alert:    return 4
         }
     }
+
+    /// Per-mood frame duration. Walks at 8 fps; sleep at 1 fps; the
+    /// scratch animation reads correctly at ~6 fps; static-pose blinks
+    /// at ~2 fps. Driven by the oneko sprite cadence.
+    var frameDurationSeconds: TimeInterval {
+        switch self {
+        case .working:        return 0.125
+        case .alert:          return 0.166
+        case .happy:          return 0.50
+        case .sad:            return 0.40
+        case .sleeping:       return 1.00
+        case .hidden:         return 1.00
+        }
+    }
 }
 
 /// Group sessions by projectId and pick the most-attention mood per project.

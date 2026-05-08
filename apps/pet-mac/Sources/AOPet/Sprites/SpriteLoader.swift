@@ -30,10 +30,17 @@ struct SpriteSet: Equatable {
 
 enum SpriteLoader {
     /// Names of sprite sets shipped in the bundle, in the order the
-    /// "Switch sprite" menu cycles through them.
-    static let availableSets: [String] = ["dog", "cat"]
+    /// "Switch sprite" menu cycles through them. Currently a single
+    /// Oneko-derived set; adding a variant is just dropping a new
+    /// directory under Resources/sprites/.
+    static let availableSets: [String] = ["oneko"]
 
-    /// Load a sprite set by directory name (e.g. "dog"). Returns nil if the
+    /// Frames are upscaled to this rendering size with nearest-neighbor so
+    /// the pixel-art reads crisply on Retina displays. Matches PetView's
+    /// sprite slot.
+    static let renderSize = NSSize(width: 64, height: 64)
+
+    /// Load a sprite set by directory name (e.g. "oneko"). Returns nil if the
     /// directory isn't in the bundle.
     static func load(_ setName: String, bundle: Bundle = .module) -> SpriteSet? {
         guard let baseURL = bundle.url(
@@ -68,9 +75,31 @@ enum SpriteLoader {
 
         for (mood, list) in grouped {
             let sorted = list.sorted { $0.0 < $1.0 }
-            frames[mood] = sorted.compactMap { NSImage(contentsOf: $0.1) }
+            frames[mood] = sorted.compactMap { entry in
+                NSImage(contentsOf: entry.1).map { upscalePixelArt($0, to: renderSize) }
+            }
         }
 
         return SpriteSet(name: setName, frames: frames)
+    }
+
+    /// Render the source image into a new NSImage at `size` using
+    /// nearest-neighbor — pixel-art smoothed by bilinear interpolation
+    /// looks like mush.
+    private static func upscalePixelArt(_ source: NSImage, to size: NSSize) -> NSImage {
+        let scaled = NSImage(size: size)
+        scaled.lockFocus()
+        if let ctx = NSGraphicsContext.current {
+            ctx.imageInterpolation = .none
+            ctx.shouldAntialias = false
+        }
+        source.draw(
+            in: NSRect(origin: .zero, size: size),
+            from: .zero,
+            operation: .copy,
+            fraction: 1.0
+        )
+        scaled.unlockFocus()
+        return scaled
     }
 }
