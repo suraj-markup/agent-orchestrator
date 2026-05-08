@@ -7,9 +7,15 @@ final class PetView: NSView {
     private static let spriteSize = NSSize(width: 64, height: 64)
     private static let bubbleHeight: CGFloat = 28
 
-    private let imageView = NSImageView(frame: .zero)
+    private let imageView = DraggableImageView(frame: .zero)
     let bubble = ThoughtBubbleView(frame: .zero)
     private let overlayView = MoodOverlayView(frame: .zero)
+
+    /// `isMovableByWindowBackground` only kicks in for clicks AppKit can
+    /// route to the window background. Subviews that don't opt in
+    /// consume the mouseDown first, so the drag never starts. Returning
+    /// true here lets the user grab the window anywhere on PetView.
+    override var mouseDownCanMoveWindow: Bool { true }
 
     /// Lazily provided by the controller — we ask for it on each right-click
     /// so menu items can reflect current state (project name, sprite name).
@@ -158,4 +164,12 @@ final class PetView: NSView {
             super.rightMouseDown(with: event)
         }
     }
+}
+
+/// NSImageView subclass that lets clicks fall through to the window's
+/// drag handling. Without this override the sprite swallows the mouseDown
+/// before AppKit can begin the window drag, so dragging anywhere over the
+/// cat would do nothing.
+final class DraggableImageView: NSImageView {
+    override var mouseDownCanMoveWindow: Bool { true }
 }
