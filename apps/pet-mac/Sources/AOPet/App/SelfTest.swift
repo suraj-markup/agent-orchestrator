@@ -165,6 +165,13 @@ enum SelfTest {
         let empty = SpriteSet(name: "empty", frames: [:])
         assertTrue(empty.frameCount(for: .working) >= 1, "empty frameCount lower-bounded at 1")
 
+        // ── Socket round-trip ───────────────────────────────────────────
+        // Real bind/connect/write/read against a temp socket. This is the
+        // only test that exercises SocketListener end-to-end.
+        if let err = SocketTestSupport.roundTrip() {
+            failures.append("socket round-trip — \(err)")
+        }
+
         if failures.isEmpty {
             print("AOPet self-test: all assertions passed")
             return 0

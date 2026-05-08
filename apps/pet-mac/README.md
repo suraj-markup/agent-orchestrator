@@ -43,8 +43,9 @@ The pet windows appear immediately. They will stay empty until either:
 
 - the AO dashboard is reachable on `http://localhost:3001` (steady-state
   polling discovers projects with sessions), **or**
-- the notifier-pet plugin opens `~/.agent-orchestrator/pet.sock` and pushes
-  events.
+- the notifier-pet plugin connects to AOPet's socket at
+  `~/.agent-orchestrator/pet.sock` and pushes events. AOPet itself owns
+  (binds and listens on) that socket — see "Event reactions" below.
 
 If both sources are unavailable the app will not crash — it logs the failure
 once per category and keeps trying in the background. Bring either source up
@@ -108,8 +109,11 @@ fall through to `sleeping` rather than crashing.
 
 #### Event reactions — `~/.agent-orchestrator/pet.sock`
 
-The companion notifier plugin (`packages/plugins/notifier-pet`, owned by a
-parallel work stream) opens the socket and writes one JSON envelope per line:
+AOPet binds and listens on `~/.agent-orchestrator/pet.sock` on launch
+(creating `~/.agent-orchestrator/` if needed and unlinking any stale file
+at the path). The companion notifier plugin (`packages/plugins/notifier-pet`,
+owned by a parallel work stream) connects as a client and writes one JSON
+envelope per line:
 
 ```json
 {
@@ -205,7 +209,7 @@ change.
 | Source       | If unavailable                          |
 | ------------ | --------------------------------------- |
 | HTTP polling | Logs `poll.network` once, keeps polling |
-| Socket       | Logs `sock.missing`/`sock.connect` once, retries with capped backoff (max 30s) |
+| Socket       | Logs `sock.bind`/`sock.listen`/`sock.accept` once on failure, retries with capped backoff (max 30s) |
 
 Each error tag is logged to `os.Logger` exactly once per process. When a
 connection recovers, the tag is cleared so a future failure logs again — this
