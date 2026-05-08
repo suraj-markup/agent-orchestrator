@@ -81,31 +81,80 @@ final class PetController {
         renderFrame()
     }
 
-    /// Show an event reaction: bubble + one-shot animation. The bubble
-    /// is prefixed with `[projectName]` so the user can tell which
-    /// project the event came from in a single-pet world.
+    /// Show an event reaction: bubble + one-shot animation. Filtered to
+    /// `urgent` and `action` priorities only — `warning` and `info`
+    /// events are silently dropped so the pet stays calm during routine
+    /// chatter (CI ticks, log lines, etc.) and only speaks when the
+    /// human actually needs to look at something.
     func handleEvent(_ event: SocketEvent, projectName: String?) {
+        guard PetController.shouldShowBubble(for: event.priority) else { return }
+
         let tint: NSColor
         switch event.priority {
         case .urgent:  tint = NSColor.systemRed
-        case .warning: tint = NSColor.systemOrange
         case .action:  tint = NSColor.systemBlue
-        case .info, .unknown: tint = NSColor(white: 0.2, alpha: 1)
+        // Filtered above; fall back to a neutral tint defensively.
+        case .warning, .info, .unknown:
+            tint = NSColor(white: 0.2, alpha: 1)
         }
         let duration: TimeInterval = event.priority == .urgent ? 6 : 4
-        let text = PetController.bubbleText(message: event.message, projectName: projectName)
+        let text = PetController.bubbleText(
+            message: event.message,
+            projectName: projectName,
+            sessionId: event.sessionId
+        )
         view.showBubble(text: text, tint: tint, durationSeconds: duration)
         view.playReaction(PetView.ReactionKind.forPriority(event.priority))
     }
 
-    /// Compose the bubble text. ProjectName is truncated to 16 chars so
-    /// long names don't blow the bubble's width budget.
-    static func bubbleText(message: String, projectName: String?) -> String {
-        guard let name = projectName, !name.isEmpty else { return message }
-        let truncated = name.count > 16
-            ? String(name.prefix(16)) + "…"
-            : name
-        return "[\(truncated)] \(message)"
+    /// Only urgent and action priorities surface a bubble. Routine
+    /// warning/info chatter is dropped before any UI work happens.
+    static func shouldShowBubble(for priority: EventPriority) -> Bool {
+        switch priority {
+        case .urgent, .action: return true
+        case .warning, .info, .unknown: return false
+        }
+    }
+
+    /// Hard ceiling on rendered bubble characters. The bubble is ~152pt
+    /// wide at 9pt medium, which fits roughly this many glyphs on one
+    /// line before NSString truncation kicks in. We do an explicit
+    /// budget so the cut always falls on the message — projectName and
+    /// sessionId are needed for disambiguation and never get clipped.
+    private static let bubbleCharBudget = 60
+
+    /// Compose `<projectName> <sessionId> <message>`. ProjectName falls
+    /// back to projectId via the caller; if neither is known the prefix
+    /// is dropped. Message is truncated with an ellipsis so the
+    /// identifying prefix always survives.
+    static func bubbleText(
+        message: String,
+        projectName: String?,
+        sessionId: String?
+    ) -> String {
+        var prefixParts: [String] = []
+        if let name = projectName, !name.isEmpty { prefixParts.append(name) }
+        if let sid = sessionId, !sid.isEmpty { prefixParts.append(sid) }
+
+        guard !prefixParts.isEmpty else {
+            return truncateMessage(message, budget: bubbleCharBudget)
+        }
+
+        let prefix = prefixParts.joined(separator: " ")
+        // Reserve the prefix + a separating space; the message gets
+        // whatever is left of the budget.
+        let used = prefix.count + 1
+        let remaining = max(0, bubbleCharBudget - used)
+        let body = truncateMessage(message, budget: remaining)
+        return "\(prefix) \(body)"
+    }
+
+    private static func truncateMessage(_ message: String, budget: Int) -> String {
+        if budget <= 0 { return "" }
+        if message.count <= budget { return message }
+        // Reserve one char for the ellipsis itself.
+        let cut = max(0, budget - 1)
+        return String(message.prefix(cut)) + "…"
     }
 
     // MARK: - Animation

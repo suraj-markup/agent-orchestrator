@@ -127,28 +127,67 @@ enum SelfTest {
         assertEqual(allIdle.mood, .sleeping, "all-idle global mood")
         assertEqual(allIdle.totalSessions, 3, "all-idle total")
 
-        // ── Bubble label ─────────────────────────────────────────────────
-        // Single-pet UI prefixes event bubbles with `[projectName]` so
-        // the user can tell which project an event came from. Long names
-        // get truncated to 16 chars + ellipsis.
+        // ── Bubble priority filter ──────────────────────────────────────
+        // Only urgent + action surface a bubble. Routine warning/info
+        // chatter is silently dropped — no bubble, no animation.
+        assertTrue(PetController.shouldShowBubble(for: .urgent),  "bubble: urgent shows")
+        assertTrue(PetController.shouldShowBubble(for: .action),  "bubble: action shows")
+        assertTrue(!PetController.shouldShowBubble(for: .warning), "bubble: warning hidden")
+        assertTrue(!PetController.shouldShowBubble(for: .info),    "bubble: info hidden")
+        assertTrue(!PetController.shouldShowBubble(for: .unknown), "bubble: unknown hidden")
+
+        // ── Bubble text format ──────────────────────────────────────────
+        // Format is `<projectName> <sessionId> <message>` — space
+        // separated, no brackets. The message is the only piece that
+        // gets truncated; identifiers always survive.
         assertEqual(
-            PetController.bubbleText(message: "PR #5 opened", projectName: nil),
+            PetController.bubbleText(
+                message: "PR #5 opened",
+                projectName: nil,
+                sessionId: nil
+            ),
             "PR #5 opened",
-            "bubble: nil project name"
+            "bubble: nil project + session"
         )
         assertEqual(
-            PetController.bubbleText(message: "PR #5 opened", projectName: "ao"),
-            "[ao] PR #5 opened",
-            "bubble: short project name"
+            PetController.bubbleText(
+                message: "needs your approval",
+                projectName: "agent-orchestrator",
+                sessionId: "ao-170"
+            ),
+            "agent-orchestrator ao-170 needs your approval",
+            "bubble: project + session + message"
         )
         assertEqual(
             PetController.bubbleText(
                 message: "PR #5 opened",
-                projectName: "agent-orchestrator-monorepo-internal"
+                projectName: "ao",
+                sessionId: nil
             ),
-            "[agent-orchestrat…] PR #5 opened",
-            "bubble: truncated long project name"
+            "ao PR #5 opened",
+            "bubble: project only"
         )
+        assertEqual(
+            PetController.bubbleText(
+                message: "PR #5 opened",
+                projectName: nil,
+                sessionId: "ao-170"
+            ),
+            "ao-170 PR #5 opened",
+            "bubble: session only"
+        )
+        let longMessage = String(repeating: "x", count: 200)
+        let truncated = PetController.bubbleText(
+            message: longMessage,
+            projectName: "agent-orchestrator",
+            sessionId: "ao-170"
+        )
+        assertTrue(
+            truncated.hasPrefix("agent-orchestrator ao-170 "),
+            "bubble: identifiers survive truncation"
+        )
+        assertTrue(truncated.hasSuffix("…"), "bubble: truncated with ellipsis")
+        assertTrue(truncated.count <= 60, "bubble: total within budget")
 
         assertTrue(PetMood.sleeping.priority < PetMood.happy.priority, "sleeping<happy")
         assertTrue(PetMood.happy.priority < PetMood.working.priority, "happy<working")
