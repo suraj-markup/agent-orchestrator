@@ -136,6 +136,15 @@ enum SelfTest {
         assertTrue(!PetController.shouldShowBubble(for: .info),    "bubble: info hidden")
         assertTrue(!PetController.shouldShowBubble(for: .unknown), "bubble: unknown hidden")
 
+        // ── Bubble sound mapping ────────────────────────────────────────
+        // Urgent → Sosumi (classic attention chime); action → Glass
+        // (softer, positive). Other priorities are silent.
+        assertEqual(PetController.soundName(for: .urgent), "Sosumi", "sound: urgent → Sosumi")
+        assertEqual(PetController.soundName(for: .action), "Glass",  "sound: action → Glass")
+        assertTrue(PetController.soundName(for: .warning) == nil,    "sound: warning silent")
+        assertTrue(PetController.soundName(for: .info)    == nil,    "sound: info silent")
+        assertTrue(PetController.soundName(for: .unknown) == nil,    "sound: unknown silent")
+
         // ── Bubble text format ──────────────────────────────────────────
         // Format is `<projectName> <sessionId> <message>` — space
         // separated, no brackets. The message is the only piece that

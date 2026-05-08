@@ -29,11 +29,18 @@ final class ThoughtBubbleView: NSView {
         path.lineWidth = 1
         path.stroke()
 
+        // 13pt matches macOS body text. The bubble is sized to fit two
+        // lines, and `truncatesLastVisibleLine` clips anything beyond
+        // that with the system ellipsis.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        paragraph.alignment = .left
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 9, weight: .medium),
-            .foregroundColor: NSColor.black
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            .foregroundColor: NSColor.black,
+            .paragraphStyle: paragraph,
         ]
-        let textRect = bounds.insetBy(dx: inset + 4, dy: inset + 2)
+        let textRect = bounds.insetBy(dx: inset + 6, dy: inset + 4)
         (text as NSString).draw(
             with: textRect,
             options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
