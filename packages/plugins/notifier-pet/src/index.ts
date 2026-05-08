@@ -1,5 +1,8 @@
+import { spawn, type SpawnOptions } from "node:child_process";
+import { accessSync, constants as fsConstants, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   type PluginModule,
   type Notifier,
@@ -11,7 +14,7 @@ export const manifest = {
   name: "pet",
   slot: "notifier" as const,
   description: "Notifier plugin: Unix socket bridge to the macOS pet overlay app",
-  version: "0.1.0",
+  version: "0.2.0",
 };
 
 const WIRE_VERSION = 1 as const;
@@ -94,18 +97,122 @@ function sendOnce(socketPath: string, line: string): Promise<void> {
   });
 }
 
+const PID_LOCKFILE = expandHome("~/.agent-orchestrator/aopet.pid");
+
+function isExecutableFile(path: string): boolean {
+  try {
+    const st = statSync(path);
+    if (!st.isFile()) return false;
+    accessSync(path, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveAopetBinary(explicit: string | undefined, cwd: string, home: string): string | null {
+  const candidates: string[] = [];
+  if (explicit && explicit.length > 0) candidates.push(expandHome(explicit));
+  if (process.env.AOPET_PATH && process.env.AOPET_PATH.length > 0) {
+    candidates.push(expandHome(process.env.AOPET_PATH));
+  }
+  candidates.push(
+    "/Applications/AOPet.app/Contents/MacOS/AOPet",
+    join(home, "Applications/AOPet.app/Contents/MacOS/AOPet"),
+    "/usr/local/bin/AOPet",
+    join(cwd, "apps/pet-mac/.build/release/AOPet"),
+    join(cwd, "apps/pet-mac/.build/debug/AOPet"),
+  );
+
+  for (const candidate of candidates) {
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  return null;
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM means the process exists but we can't signal it — still alive.
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function readLockfilePid(path: string): number | null {
+  try {
+    const raw = readFileSync(path, "utf8").trim();
+    const pid = Number.parseInt(raw, 10);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLockfile(path: string, pid: number): void {
+  try {
+    writeFileSync(path, `${pid}\n`, { encoding: "utf8", mode: 0o644 });
+  } catch {
+    // Lockfile is a best-effort optimization. If we can't write it, just skip —
+    // worst case we re-launch AOPet on the next ao start while one is already up.
+  }
+}
+
+interface AutoLaunchOptions {
+  appPath?: string;
+  pidFile: string;
+  cwd: string;
+  home: string;
+  warn: (message: string) => void;
+}
+
+function tryAutoLaunch(opts: AutoLaunchOptions): void {
+  if (process.platform !== "darwin") return;
+
+  const existingPid = readLockfilePid(opts.pidFile);
+  if (existingPid !== null && isPidAlive(existingPid)) return;
+
+  const binary = resolveAopetBinary(opts.appPath, opts.cwd, opts.home);
+  if (!binary) {
+    opts.warn(
+      "[notifier-pet] AOPet binary not found; install AOPet.app or set notifiers.pet.appPath / AOPET_PATH.",
+    );
+    return;
+  }
+
+  try {
+    const spawnOpts: SpawnOptions = { detached: true, stdio: "ignore" };
+    const child = spawn(binary, [], spawnOpts);
+    child.on("error", () => {
+      // Swallow — AOPet failures must never propagate into the orchestrator.
+    });
+    if (typeof child.pid === "number") {
+      writeLockfile(opts.pidFile, child.pid);
+    }
+    child.unref();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    opts.warn(`[notifier-pet] Failed to launch AOPet at ${binary}: ${reason}`);
+  }
+}
+
 export function create(config?: Record<string, unknown>): Notifier {
   const enabled = typeof config?.enabled === "boolean" ? config.enabled : true;
+  const autoLaunch = typeof config?.autoLaunch === "boolean" ? config.autoLaunch : true;
+  const appPath =
+    typeof config?.appPath === "string" && config.appPath.length > 0 ? config.appPath : undefined;
   const rawSocketPath =
     typeof config?.socketPath === "string" && config.socketPath.length > 0
       ? config.socketPath
       : "~/.agent-orchestrator/pet.sock";
   const socketPath = expandHome(rawSocketPath);
 
-  let warned = false;
-  const warnOnce = (err: unknown) => {
-    if (warned) return;
-    warned = true;
+  let socketWarned = false;
+  const warnSocketOnce = (err: unknown) => {
+    if (socketWarned) return;
+    socketWarned = true;
     const reason = err instanceof Error ? err.message : String(err);
     console.warn(
       `[notifier-pet] Could not deliver to pet socket at ${socketPath}: ${reason}. ` +
@@ -113,13 +220,30 @@ export function create(config?: Record<string, unknown>): Notifier {
     );
   };
 
+  let launchWarned = false;
+  const warnLaunchOnce = (message: string) => {
+    if (launchWarned) return;
+    launchWarned = true;
+    console.warn(message);
+  };
+
+  if (enabled && autoLaunch) {
+    tryAutoLaunch({
+      appPath,
+      pidFile: PID_LOCKFILE,
+      cwd: process.cwd(),
+      home: homedir(),
+      warn: warnLaunchOnce,
+    });
+  }
+
   async function deliver(message: WireMessage): Promise<void> {
     if (!enabled) return;
     const line = `${JSON.stringify(message)}\n`;
     try {
       await sendOnce(socketPath, line);
     } catch (err) {
-      warnOnce(err);
+      warnSocketOnce(err);
     }
   }
 

@@ -1,10 +1,40 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createServer, type Server, type Socket } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import type * as FsModule from "node:fs";
+import type * as NetModule from "node:net";
+import type * as OsModule from "node:os";
+import type * as ChildProcessModule from "node:child_process";
+import type { Server, Socket } from "node:net";
 import type { OrchestratorEvent, NotifyAction } from "@aoagents/ao-core";
-import { create, manifest } from "../index.js";
+
+const realFs = await vi.importActual<typeof FsModule>("node:fs");
+const realNet = await vi.importActual<typeof NetModule>("node:net");
+const realOs = await vi.importActual<typeof OsModule>("node:os");
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof FsModule>();
+  return {
+    ...actual,
+    statSync: vi.fn(actual.statSync),
+    accessSync: vi.fn(actual.accessSync),
+    readFileSync: vi.fn(actual.readFileSync),
+    writeFileSync: vi.fn(actual.writeFileSync),
+  };
+});
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof ChildProcessModule>();
+  return { ...actual, spawn: vi.fn() };
+});
+
+const fsMod = await import("node:fs");
+const childProcessMod = await import("node:child_process");
+const mockedSpawn = childProcessMod.spawn as unknown as ReturnType<typeof vi.fn>;
+const mockedStatSync = fsMod.statSync as unknown as ReturnType<typeof vi.fn>;
+const mockedAccessSync = fsMod.accessSync as unknown as ReturnType<typeof vi.fn>;
+const mockedReadFileSync = fsMod.readFileSync as unknown as ReturnType<typeof vi.fn>;
+const mockedWriteFileSync = fsMod.writeFileSync as unknown as ReturnType<typeof vi.fn>;
+
+const { create, manifest } = await import("../index.js");
 
 function makeEvent(overrides: Partial<OrchestratorEvent> = {}): OrchestratorEvent {
   return {
@@ -28,11 +58,11 @@ interface RunningServer {
 }
 
 async function startServer(dir: string, name = "pet.sock"): Promise<RunningServer> {
-  const socketPath = join(dir, name);
+  const socketPath = realFs.realpathSync(dir) + "/" + name;
   const received: string[] = [];
   const sockets = new Set<Socket>();
 
-  const server = createServer((conn) => {
+  const server = realNet.createServer((conn) => {
     sockets.add(conn);
     let buf = "";
     conn.on("data", (chunk) => {
@@ -78,11 +108,21 @@ async function waitForReceive(server: RunningServer, expected = 1, timeoutMs = 1
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "ao-notifier-pet-"));
+  tmpDir = realFs.mkdtempSync(realOs.tmpdir() + "/ao-notifier-pet-");
+  // Reset all mocks and restore real-fs delegation as the default.
+  mockedSpawn.mockReset();
+  mockedStatSync.mockReset();
+  mockedStatSync.mockImplementation(realFs.statSync);
+  mockedAccessSync.mockReset();
+  mockedAccessSync.mockImplementation(realFs.accessSync);
+  mockedReadFileSync.mockReset();
+  mockedReadFileSync.mockImplementation(realFs.readFileSync);
+  mockedWriteFileSync.mockReset();
+  mockedWriteFileSync.mockImplementation(realFs.writeFileSync);
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  realFs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("notifier-pet manifest", () => {
@@ -96,14 +136,14 @@ describe("notifier-pet manifest", () => {
 
 describe("notifier-pet create", () => {
   it("returns a notifier with the expected shape", () => {
-    const notifier = create({ socketPath: join(tmpDir, "pet.sock") });
+    const notifier = create({ socketPath: tmpDir + "/pet.sock", autoLaunch: false });
     expect(notifier.name).toBe("pet");
     expect(typeof notifier.notify).toBe("function");
     expect(typeof notifier.notifyWithActions).toBe("function");
   });
 
   it("expands ~ in socketPath default without throwing", () => {
-    expect(() => create()).not.toThrow();
+    expect(() => create({ autoLaunch: false })).not.toThrow();
   });
 });
 
@@ -111,7 +151,7 @@ describe("notifier-pet notify (success path)", () => {
   it("writes one newline-terminated JSON line to the socket and closes", async () => {
     const server = await startServer(tmpDir);
     try {
-      const notifier = create({ socketPath: server.socketPath });
+      const notifier = create({ socketPath: server.socketPath, autoLaunch: false });
       await notifier.notify(makeEvent());
       await waitForReceive(server);
 
@@ -143,7 +183,7 @@ describe("notifier-pet notify (success path)", () => {
   it("opens a fresh connection for each notify call (no pooling)", async () => {
     const server = await startServer(tmpDir);
     try {
-      const notifier = create({ socketPath: server.socketPath });
+      const notifier = create({ socketPath: server.socketPath, autoLaunch: false });
       await notifier.notify(makeEvent({ id: "a" }));
       await notifier.notify(makeEvent({ id: "b" }));
       await notifier.notify(makeEvent({ id: "c" }));
@@ -162,7 +202,7 @@ describe("notifier-pet notifyWithActions (success path)", () => {
   it("includes actions array with {label, action} entries", async () => {
     const server = await startServer(tmpDir);
     try {
-      const notifier = create({ socketPath: server.socketPath });
+      const notifier = create({ socketPath: server.socketPath, autoLaunch: false });
       const actions: NotifyAction[] = [
         { label: "Open PR", url: "https://github.com/pr/1" },
         { label: "Kill", callbackEndpoint: "/api/kill" },
@@ -191,7 +231,7 @@ describe("notifier-pet graceful fallback", () => {
   it("does not throw when the socket file does not exist (ENOENT)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const notifier = create({ socketPath: join(tmpDir, "missing.sock") });
+      const notifier = create({ socketPath: tmpDir + "/missing.sock", autoLaunch: false });
       await expect(notifier.notify(makeEvent())).resolves.toBeUndefined();
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]![0]).toMatch(/notifier-pet/);
@@ -203,7 +243,7 @@ describe("notifier-pet graceful fallback", () => {
   it("warns only once per process across many failures", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const notifier = create({ socketPath: join(tmpDir, "missing.sock") });
+      const notifier = create({ socketPath: tmpDir + "/missing.sock", autoLaunch: false });
       await notifier.notify(makeEvent());
       await notifier.notify(makeEvent());
       await notifier.notifyWithActions!(makeEvent(), [{ label: "X", url: "https://x" }]);
@@ -215,15 +255,15 @@ describe("notifier-pet graceful fallback", () => {
 
   it("swallows write errors when the server hangs up immediately", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const socketPath = join(tmpDir, "pet.sock");
-    const server = createServer((conn) => {
+    const socketPath = tmpDir + "/pet.sock";
+    const server = realNet.createServer((conn) => {
       // Drop the connection before the client can write.
       conn.destroy();
     });
     await new Promise<void>((resolve) => server.listen(socketPath, () => resolve()));
 
     try {
-      const notifier = create({ socketPath });
+      const notifier = create({ socketPath, autoLaunch: false });
       await expect(notifier.notify(makeEvent())).resolves.toBeUndefined();
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -235,8 +275,9 @@ describe("notifier-pet graceful fallback", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const notifier = create({
-        socketPath: join(tmpDir, "missing.sock"),
+        socketPath: tmpDir + "/missing.sock",
         enabled: false,
+        autoLaunch: false,
       });
       await notifier.notify(makeEvent());
       await notifier.notifyWithActions!(makeEvent(), []);
@@ -244,5 +285,156 @@ describe("notifier-pet graceful fallback", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("notifier-pet auto-launch", () => {
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+  const originalEnv = process.env.AOPET_PATH;
+
+  function setPlatform(value: NodeJS.Platform): void {
+    Object.defineProperty(process, "platform", { value, configurable: true });
+  }
+
+  beforeEach(() => {
+    setPlatform("darwin");
+    delete process.env.AOPET_PATH;
+    // No lockfile by default.
+    mockedReadFileSync.mockReset();
+    mockedReadFileSync.mockImplementation(() => {
+      const err = new Error("ENOENT") as NodeJS.ErrnoException;
+      err.code = "ENOENT";
+      throw err;
+    });
+    mockedWriteFileSync.mockReset();
+    mockedWriteFileSync.mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "platform", originalPlatformDescriptor);
+    if (originalEnv === undefined) delete process.env.AOPET_PATH;
+    else process.env.AOPET_PATH = originalEnv;
+  });
+
+  function fakeChildProcess(pid = 4242): unknown {
+    return {
+      pid,
+      on(_event: string, _handler: (...args: unknown[]) => void) {
+        return this;
+      },
+      unref: vi.fn(),
+    };
+  }
+
+  function fakeStat(): ReturnType<typeof fsMod.statSync> {
+    return { isFile: () => true } as unknown as ReturnType<typeof fsMod.statSync>;
+  }
+
+  function enoent(): never {
+    const err = new Error("ENOENT") as NodeJS.ErrnoException;
+    err.code = "ENOENT";
+    throw err;
+  }
+
+  it("spawns AOPet with detached:true when binary resolves and autoLaunch is true", () => {
+    const explicit = "/Applications/AOPet.app/Contents/MacOS/AOPet";
+    mockedStatSync.mockImplementation((path: unknown) => (path === explicit ? fakeStat() : enoent()));
+    mockedAccessSync.mockImplementation((path: unknown) => {
+      if (path === explicit) return;
+      enoent();
+    });
+    const child = fakeChildProcess();
+    mockedSpawn.mockReturnValue(child);
+
+    create({ socketPath: tmpDir + "/pet.sock", autoLaunch: true });
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(1);
+    const [calledPath, calledArgs, calledOpts] = mockedSpawn.mock.calls[0]!;
+    expect(calledPath).toBe(explicit);
+    expect(calledArgs).toEqual([]);
+    expect(calledOpts).toMatchObject({ detached: true, stdio: "ignore" });
+    expect((child as { unref: ReturnType<typeof vi.fn> }).unref).toHaveBeenCalledTimes(1);
+  });
+
+  it("respects an explicit appPath override before defaults", () => {
+    const explicit = "/opt/custom/AOPet";
+    mockedStatSync.mockImplementation((path: unknown) => (path === explicit ? fakeStat() : enoent()));
+    mockedAccessSync.mockImplementation((path: unknown) => {
+      if (path === explicit) return;
+      enoent();
+    });
+    mockedSpawn.mockReturnValue(fakeChildProcess());
+
+    create({ appPath: explicit, autoLaunch: true });
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(1);
+    expect(mockedSpawn.mock.calls[0]![0]).toBe(explicit);
+  });
+
+  it("respects AOPET_PATH env var when no config override is set", () => {
+    const envPath = "/srv/AOPet";
+    process.env.AOPET_PATH = envPath;
+    mockedStatSync.mockImplementation((path: unknown) => (path === envPath ? fakeStat() : enoent()));
+    mockedAccessSync.mockImplementation((path: unknown) => {
+      if (path === envPath) return;
+      enoent();
+    });
+    mockedSpawn.mockReturnValue(fakeChildProcess());
+
+    create({ autoLaunch: true });
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(1);
+    expect(mockedSpawn.mock.calls[0]![0]).toBe(envPath);
+  });
+
+  it("does NOT spawn when autoLaunch is false", () => {
+    mockedStatSync.mockImplementation(() => fakeStat());
+    mockedAccessSync.mockImplementation(() => undefined);
+
+    create({ autoLaunch: false });
+
+    expect(mockedSpawn).not.toHaveBeenCalled();
+  });
+
+  it("does NOT spawn when the plugin is disabled", () => {
+    mockedStatSync.mockImplementation(() => fakeStat());
+    mockedAccessSync.mockImplementation(() => undefined);
+
+    create({ enabled: false, autoLaunch: true });
+
+    expect(mockedSpawn).not.toHaveBeenCalled();
+  });
+
+  it("does NOT spawn on non-darwin platforms", () => {
+    setPlatform("linux");
+    mockedStatSync.mockImplementation(() => fakeStat());
+    mockedAccessSync.mockImplementation(() => undefined);
+
+    create({ autoLaunch: true });
+
+    expect(mockedSpawn).not.toHaveBeenCalled();
+  });
+
+  it("logs a single warning and does NOT spawn when no binary is found", () => {
+    mockedStatSync.mockImplementation(() => enoent());
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      create({ autoLaunch: true });
+      expect(mockedSpawn).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toMatch(/AOPet binary not found/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does NOT spawn when an existing AOPet pid in the lockfile is still alive", () => {
+    mockedReadFileSync.mockImplementation(() => `${process.pid}\n`);
+    mockedStatSync.mockImplementation(() => fakeStat());
+    mockedAccessSync.mockImplementation(() => undefined);
+
+    create({ autoLaunch: true });
+
+    expect(mockedSpawn).not.toHaveBeenCalled();
   });
 });
