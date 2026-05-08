@@ -36,6 +36,18 @@ final class StateAggregatorTests: XCTestCase {
         XCTAssertEqual(StateAggregator.mood(for: session("s", "p", .approved, .idle)), .happy)
     }
 
+    func testReviewPendingProducesHappy() {
+        // review_pending is "PR open, waiting on a human reviewer" — same
+        // vibe as pr_open. Without this, the pet sleeps through the
+        // entire review cycle.
+        XCTAssertEqual(StateAggregator.mood(for: session("s", "p", .reviewPending, .idle)), .happy)
+    }
+
+    func testMergedProducesHappy() {
+        // The celebration moment before cleanup ticks the session to done.
+        XCTAssertEqual(StateAggregator.mood(for: session("s", "p", .merged, .idle)), .happy)
+    }
+
     func testWorkingActivityProducesWorking() {
         XCTAssertEqual(StateAggregator.mood(for: session("s", "p", .working, .active)), .working)
     }
@@ -75,7 +87,7 @@ final class StateAggregatorTests: XCTestCase {
         let sessions = [
             session("a", "p1", .working, .active),
             session("b", "p1", .working, .active),
-            session("c", "p2", .merged)
+            session("c", "p2", .done)
         ]
         let projects = StateAggregator.aggregate(
             sessions: sessions,
