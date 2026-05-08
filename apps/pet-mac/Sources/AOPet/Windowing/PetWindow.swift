@@ -4,7 +4,10 @@ import AppKit
 /// Click-through is OFF so the user can right-click for a context menu and
 /// drag the pet around the screen.
 final class PetWindow: NSWindow {
-    static let defaultSize = NSSize(width: 96, height: 96)
+    /// Tracks `PetView.totalSize`. Callers normally pass an explicit
+    /// size, but this default keeps `PetWindow()` instantiable from
+    /// places that don't know the view geometry.
+    static let defaultSize = NSSize(width: 240, height: 132)
 
     init(size: NSSize = PetWindow.defaultSize) {
         super.init(

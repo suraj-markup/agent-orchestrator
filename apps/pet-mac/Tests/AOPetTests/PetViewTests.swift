@@ -40,6 +40,37 @@ final class PetViewTests: XCTestCase {
         XCTAssertFalse(PetController.shouldShowBubble(for: .unknown))
     }
 
+    // MARK: - Bubble sound mapping
+
+    func testUrgentPlaysSosumi() {
+        XCTAssertEqual(PetController.soundName(for: .urgent), "Sosumi")
+    }
+
+    func testActionPlaysGlass() {
+        XCTAssertEqual(PetController.soundName(for: .action), "Glass")
+    }
+
+    func testWarningHasNoSound() {
+        XCTAssertNil(PetController.soundName(for: .warning))
+    }
+
+    func testInfoHasNoSound() {
+        XCTAssertNil(PetController.soundName(for: .info))
+    }
+
+    func testUnknownHasNoSound() {
+        XCTAssertNil(PetController.soundName(for: .unknown))
+    }
+
+    // MARK: - PetView geometry
+
+    func testPetViewSizeFitsBigBubble() {
+        // The bumped totalSize must accommodate the 64pt sprite, an 8pt
+        // edge margin, and a 52pt bubble row without negative slack.
+        XCTAssertGreaterThanOrEqual(PetView.totalSize.width, 240)
+        XCTAssertGreaterThanOrEqual(PetView.totalSize.height, 132)
+    }
+
     // MARK: - Bubble text format
 
     func testBubbleTextDropsPrefixWhenNoProjectOrSession() {

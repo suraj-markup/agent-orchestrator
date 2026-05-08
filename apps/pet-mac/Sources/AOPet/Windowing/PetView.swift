@@ -3,9 +3,11 @@ import AppKit
 /// The visible pet: sprite at the bottom, thought bubble at the top.
 /// Forwards right-clicks to a delegate-provided NSMenu.
 final class PetView: NSView {
-    static let totalSize = NSSize(width: 160, height: 96)
+    static let totalSize = NSSize(width: 240, height: 132)
     private static let spriteSize = NSSize(width: 64, height: 64)
-    private static let bubbleHeight: CGFloat = 28
+    /// Tall enough to comfortably fit two lines of 13pt text.
+    private static let bubbleHeight: CGFloat = 52
+    private static let edgeMargin: CGFloat = 8
 
     private let imageView = DraggableImageView(frame: .zero)
     let bubble = ThoughtBubbleView(frame: .zero)
@@ -37,19 +39,22 @@ final class PetView: NSView {
 
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.imageAlignment = .alignCenter
+        // Sprite sits flush bottom-right with an 8pt margin.
         imageView.frame = NSRect(
-            x: bounds.width - PetView.spriteSize.width - 8,
-            y: 4,
+            x: bounds.width - PetView.spriteSize.width - PetView.edgeMargin,
+            y: PetView.edgeMargin,
             width: PetView.spriteSize.width,
             height: PetView.spriteSize.height
         )
         imageView.autoresizingMask = [.minXMargin, .maxYMargin]
         addSubview(imageView)
 
+        // Bubble takes the full top row width minus 8pt margins on
+        // each side so longer messages have room to wrap to two lines.
         bubble.frame = NSRect(
-            x: 4,
-            y: bounds.height - PetView.bubbleHeight - 4,
-            width: bounds.width - 8,
+            x: PetView.edgeMargin,
+            y: bounds.height - PetView.bubbleHeight - PetView.edgeMargin,
+            width: bounds.width - PetView.edgeMargin * 2,
             height: PetView.bubbleHeight
         )
         bubble.autoresizingMask = [.maxXMargin, .minYMargin]

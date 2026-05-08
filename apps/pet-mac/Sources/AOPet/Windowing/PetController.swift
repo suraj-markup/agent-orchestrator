@@ -105,6 +105,12 @@ final class PetController {
         )
         view.showBubble(text: text, tint: tint, durationSeconds: duration)
         view.playReaction(PetView.ReactionKind.forPriority(event.priority))
+
+        // Audio cue for attention-worthy events. Fire-and-forget on the
+        // current thread — NSSound.play returns immediately.
+        if let soundName = PetController.soundName(for: event.priority) {
+            NSSound(named: NSSound.Name(soundName))?.play()
+        }
     }
 
     /// Only urgent and action priorities surface a bubble. Routine
@@ -113,6 +119,17 @@ final class PetController {
         switch priority {
         case .urgent, .action: return true
         case .warning, .info, .unknown: return false
+        }
+    }
+
+    /// macOS system sound name to play alongside the bubble. Urgent gets
+    /// the classic Sosumi attention chime; action gets the softer Glass.
+    /// Anything else is silent (those events don't show a bubble).
+    static func soundName(for priority: EventPriority) -> String? {
+        switch priority {
+        case .urgent:  return "Sosumi"
+        case .action:  return "Glass"
+        case .warning, .info, .unknown: return nil
         }
     }
 
