@@ -186,6 +186,15 @@ enum SelfTest {
             "alert < happy frame duration"
         )
 
+        // ── Window drag opt-in ──────────────────────────────────────────
+        // The pet window is borderless; isMovableByWindowBackground only
+        // works if subviews opt in to mouseDown forwarding. Both PetView
+        // and the sprite NSImageView subclass must return true here.
+        let dragView = PetView(frame: NSRect(origin: .zero, size: PetView.totalSize))
+        assertTrue(dragView.mouseDownCanMoveWindow, "PetView.mouseDownCanMoveWindow = true")
+        let dragSprite = DraggableImageView(frame: .zero)
+        assertTrue(dragSprite.mouseDownCanMoveWindow, "DraggableImageView.mouseDownCanMoveWindow = true")
+
         // ── Socket round-trip ───────────────────────────────────────────
         // Real bind/connect/write/read against a temp socket. This is the
         // only test that exercises SocketListener end-to-end.
