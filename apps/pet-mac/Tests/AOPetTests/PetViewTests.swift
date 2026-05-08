@@ -18,38 +18,100 @@ final class PetViewTests: XCTestCase {
         XCTAssertTrue(view.mouseDownCanMoveWindow)
     }
 
-    // MARK: - Event bubble label
+    // MARK: - Bubble priority filter
 
-    func testBubbleTextOmitsBracketsWhenNoProjectName() {
+    func testShouldShowBubbleForUrgent() {
+        XCTAssertTrue(PetController.shouldShowBubble(for: .urgent))
+    }
+
+    func testShouldShowBubbleForAction() {
+        XCTAssertTrue(PetController.shouldShowBubble(for: .action))
+    }
+
+    func testShouldNotShowBubbleForWarning() {
+        XCTAssertFalse(PetController.shouldShowBubble(for: .warning))
+    }
+
+    func testShouldNotShowBubbleForInfo() {
+        XCTAssertFalse(PetController.shouldShowBubble(for: .info))
+    }
+
+    func testShouldNotShowBubbleForUnknown() {
+        XCTAssertFalse(PetController.shouldShowBubble(for: .unknown))
+    }
+
+    // MARK: - Bubble text format
+
+    func testBubbleTextDropsPrefixWhenNoProjectOrSession() {
         XCTAssertEqual(
-            PetController.bubbleText(message: "PR #5 opened", projectName: nil),
+            PetController.bubbleText(
+                message: "PR #5 opened",
+                projectName: nil,
+                sessionId: nil
+            ),
             "PR #5 opened"
         )
     }
 
-    func testBubbleTextOmitsBracketsWhenProjectNameIsEmpty() {
+    func testBubbleTextDropsPrefixWhenBothEmpty() {
         XCTAssertEqual(
-            PetController.bubbleText(message: "PR #5 opened", projectName: ""),
+            PetController.bubbleText(
+                message: "PR #5 opened",
+                projectName: "",
+                sessionId: ""
+            ),
             "PR #5 opened"
         )
     }
 
-    func testBubbleTextPrependsProjectName() {
+    func testBubbleTextWithProjectAndSessionIsSpaceSeparated() {
         XCTAssertEqual(
-            PetController.bubbleText(message: "PR #5 opened", projectName: "ao"),
-            "[ao] PR #5 opened"
+            PetController.bubbleText(
+                message: "needs your approval",
+                projectName: "agent-orchestrator",
+                sessionId: "ao-170"
+            ),
+            "agent-orchestrator ao-170 needs your approval"
         )
     }
 
-    func testBubbleTextTruncatesLongProjectNames() {
-        // Single-pet UI must show *which* project the event came from
-        // without blowing the bubble's width budget. Anything past 16
-        // chars is truncated with an ellipsis.
-        let longName = "agent-orchestrator-monorepo-internal"
+    func testBubbleTextWithOnlyProjectName() {
+        XCTAssertEqual(
+            PetController.bubbleText(
+                message: "PR #5 opened",
+                projectName: "ao",
+                sessionId: nil
+            ),
+            "ao PR #5 opened"
+        )
+    }
+
+    func testBubbleTextWithOnlySessionId() {
+        XCTAssertEqual(
+            PetController.bubbleText(
+                message: "PR #5 opened",
+                projectName: nil,
+                sessionId: "ao-170"
+            ),
+            "ao-170 PR #5 opened"
+        )
+    }
+
+    func testBubbleTextTruncatesMessageNotIdentifiers() {
+        // Long message + short project/session: cut MUST fall on the
+        // message so the user can still tell which session this is.
+        let longMessage = String(repeating: "x", count: 200)
         let result = PetController.bubbleText(
-            message: "PR #5 opened",
-            projectName: longName
+            message: longMessage,
+            projectName: "agent-orchestrator",
+            sessionId: "ao-170"
         )
-        XCTAssertEqual(result, "[agent-orchestrat…] PR #5 opened")
+        XCTAssertTrue(result.hasPrefix("agent-orchestrator ao-170 "))
+        XCTAssertTrue(result.hasSuffix("…"))
+        // Total bubble text is bounded by the char budget (60).
+        XCTAssertLessThanOrEqual(result.count, 60)
+        // Project name and session id survive untouched.
+        XCTAssertTrue(result.contains("agent-orchestrator"))
+        XCTAssertTrue(result.contains("ao-170"))
     }
 }

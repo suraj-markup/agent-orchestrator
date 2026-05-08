@@ -77,7 +77,12 @@ final class WindowManager {
     // MARK: - Event routing
 
     func deliver(event envelope: SocketEnvelope) {
-        let projectName: String? = envelope.event.projectId.flatMap { projectNames[$0] }
+        // Prefer the human-readable project name from the latest poller
+        // snapshot; fall back to the raw projectId when an event arrives
+        // before the first /api/sessions response has populated names.
+        let projectName: String? = envelope.event.projectId.map { id in
+            projectNames[id] ?? id
+        }
         controller?.handleEvent(envelope.event, projectName: projectName)
     }
 
