@@ -43,7 +43,16 @@ ONEKO_SPRITES = {
     "scratchSelf":  [[-5,  0], [-6,  0], [-7,  0]],
     "tired":        [[-3, -2]],
     "sleeping":     [[-2,  0], [-2, -1]],
+    # 8 walking directions × 2 frames each. Directions follow compass
+    # bearings (N = up, E = right). Used for the wander animation.
+    "N":  [[-1, -2], [-1, -3]],
+    "NE": [[ 0, -2], [ 0, -3]],
     "E":  [[-3,  0], [-3, -1]],
+    "SE": [[-5, -1], [-5, -2]],
+    "S":  [[-6, -3], [-7, -2]],
+    "SW": [[-5, -3], [-6, -1]],
+    "W":  [[-4, -2], [-4, -3]],
+    "NW": [[-1,  0], [-1, -1]],
 }
 
 ONEKO_MOOD_TO_FRAMES = {
@@ -54,6 +63,18 @@ ONEKO_MOOD_TO_FRAMES = {
     "alert":    [("scratchSelf", 0), ("scratchSelf", 1), ("scratchSelf", 2)],
 }
 
+# Compass direction → oneko sprite-key for the walk animation.
+ONEKO_WALK_DIRS = {
+    "n":  "N",
+    "ne": "NE",
+    "e":  "E",
+    "se": "SE",
+    "s":  "S",
+    "sw": "SW",
+    "w":  "W",
+    "nw": "NW",
+}
+
 # ── dog (XBM) ─────────────────────────────────────────────────────────────
 # tie/oneko bitmaps mirror. Each entry is the XBM filename relative to
 # bitmaps/dog/. 32x32, 1bpp, LSB-first.
@@ -61,14 +82,30 @@ DOG_XBM_BASE = "https://raw.githubusercontent.com/tie/oneko/master/bitmaps/dog"
 DOG_XBM_FILES = {
     "sleep1":  "sleep1_dog.xbm",
     "sleep2":  "sleep2_dog.xbm",
-    "right1":  "right1_dog.xbm",   # walking east, frame 0
-    "right2":  "right2_dog.xbm",   # walking east, frame 1
     "mati2":   "mati2_dog.xbm",    # standing/idle blink frame
     "mati3":   "mati3_dog.xbm",
     "awake":   "awake_dog.xbm",    # surprised pose
     "kaki1":   "kaki1_dog.xbm",    # scratching itself, frames
     "kaki2":   "kaki2_dog.xbm",
     "jare2":   "jare2_dog.xbm",    # third scratching pose
+    # 8 walking directions × 2 frames. The xneko `dw` prefix means
+    # "diagonal walk" (south-east/south-west).
+    "right1":  "right1_dog.xbm",
+    "right2":  "right2_dog.xbm",
+    "left1":   "left1_dog.xbm",
+    "left2":   "left2_dog.xbm",
+    "up1":     "up1_dog.xbm",
+    "up2":     "up2_dog.xbm",
+    "down1":   "down1_dog.xbm",
+    "down2":   "down2_dog.xbm",
+    "upright1":  "upright1_dog.xbm",
+    "upright2":  "upright2_dog.xbm",
+    "upleft1":   "upleft1_dog.xbm",
+    "upleft2":   "upleft2_dog.xbm",
+    "dwright1":  "dwright1_dog.xbm",
+    "dwright2":  "dwright2_dog.xbm",
+    "dwleft1":   "dwleft1_dog.xbm",
+    "dwleft2":   "dwleft2_dog.xbm",
 }
 
 DOG_MOOD_TO_FRAMES = {
@@ -77,6 +114,19 @@ DOG_MOOD_TO_FRAMES = {
     "happy":    [("mati2",),  ("mati3",)],    # idle blink
     "sad":      [("awake",),  ("mati2",)],    # surprised + neutral; gets red ! overlay
     "alert":    [("kaki1",),  ("kaki2",), ("jare2",)],
+}
+
+# Compass direction → (frame0_pose, frame1_pose) for the dog walk.
+# `dw` prefix in upstream xneko = "diagonal walk" (south-bound).
+DOG_WALK_DIRS = {
+    "n":  ("up1",       "up2"),
+    "ne": ("upright1",  "upright2"),
+    "e":  ("right1",    "right2"),
+    "se": ("dwright1",  "dwright2"),
+    "s":  ("down1",     "down2"),
+    "sw": ("dwleft1",   "dwleft2"),
+    "w":  ("left1",     "left2"),
+    "nw": ("upleft1",   "upleft2"),
 }
 
 # RGB foreground colour the XBM bits render to. Alpha is per-bit (1=opaque,
@@ -154,6 +204,12 @@ def write_oneko(cache: str, out_dir: str) -> None:
             cropped[(key, idx)].save(
                 os.path.join(out_dir, f"{mood}_{i}.png")
             )
+    # Walk frames per direction, used by the wander animation.
+    for dir_name, sprite_key in ONEKO_WALK_DIRS.items():
+        for i in range(2):
+            cropped[(sprite_key, i)].save(
+                os.path.join(out_dir, f"walk_{dir_name}_{i}.png")
+            )
 
 
 def write_dog(cache: str, out_dir: str) -> None:
@@ -167,6 +223,10 @@ def write_dog(cache: str, out_dir: str) -> None:
     for mood, specs in DOG_MOOD_TO_FRAMES.items():
         for i, (pose,) in enumerate(specs):
             poses[pose].save(os.path.join(out_dir, f"{mood}_{i}.png"))
+    # Walk frames per direction.
+    for dir_name, (frame0, frame1) in DOG_WALK_DIRS.items():
+        poses[frame0].save(os.path.join(out_dir, f"walk_{dir_name}_0.png"))
+        poses[frame1].save(os.path.join(out_dir, f"walk_{dir_name}_1.png"))
 
 
 def reset_dir(path: str) -> None:

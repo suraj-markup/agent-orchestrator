@@ -1,16 +1,27 @@
 import AppKit
 import Foundation
 
-/// Loads frame sequences for a sprite set from the bundle.
-/// Filenames are `{mood}_{frame}.png` under `Resources/sprites/{set}`.
+/// Loads frame sequences for a sprite set from the bundle. Filenames:
+///   * `{mood}_{frame}.png`  — idle/event poses keyed by `PetMood`
+///   * `walk_{dir}_{frame}.png` — wander animation keyed by `WalkDirection`
+///
+/// Both kinds live side-by-side under `Resources/sprites/{set}`.
 struct SpriteSet: Equatable {
     let name: String
     /// frames[mood] is the ordered animation strip for that mood.
     private let frames: [PetMood: [NSImage]]
+    /// walkFrames[direction] is the ordered animation strip for the
+    /// wander animation in that direction.
+    private let walkFrames: [WalkDirection: [NSImage]]
 
-    init(name: String, frames: [PetMood: [NSImage]]) {
+    init(
+        name: String,
+        frames: [PetMood: [NSImage]],
+        walkFrames: [WalkDirection: [NSImage]] = [:]
+    ) {
         self.name = name
         self.frames = frames
+        self.walkFrames = walkFrames
     }
 
     /// Number of frames available for `mood`. Always >= 1 once a set is loaded
@@ -23,6 +34,21 @@ struct SpriteSet: Equatable {
     /// can pass a monotonic counter.
     func image(for mood: PetMood, tick: Int) -> NSImage? {
         guard let strip = frames[mood], !strip.isEmpty else { return nil }
+        let idx = ((tick % strip.count) + strip.count) % strip.count
+        return strip[idx]
+    }
+
+    /// Number of walk frames for `direction`. Returns 0 if the set
+    /// doesn't ship walk frames at all (older sets pre-wander).
+    func walkFrameCount(for direction: WalkDirection) -> Int {
+        return walkFrames[direction]?.count ?? 0
+    }
+
+    /// The walk image for `direction` at animation tick `tick`. Returns
+    /// nil when the set lacks walk frames; callers fall back to the
+    /// mood image.
+    func image(for direction: WalkDirection, tick: Int) -> NSImage? {
+        guard let strip = walkFrames[direction], !strip.isEmpty else { return nil }
         let idx = ((tick % strip.count) + strip.count) % strip.count
         return strip[idx]
     }
@@ -60,7 +86,6 @@ enum SpriteLoader {
             return nil
         }
 
-        var frames: [PetMood: [NSImage]] = [:]
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(
             at: baseURL,
@@ -69,27 +94,45 @@ enum SpriteLoader {
             return nil
         }
 
-        // Group files by mood prefix, sort by frame index, load NSImages.
-        var grouped: [PetMood: [(Int, URL)]] = [:]
+        // Group filenames into two buckets:
+        //   * `walk_{dir}_{n}.png` → walkFrames[direction]
+        //   * `{mood}_{n}.png`     → frames[mood]
+        var moodGrouped: [PetMood: [(Int, URL)]] = [:]
+        var walkGrouped: [WalkDirection: [(Int, URL)]] = [:]
+
         for url in contents where url.pathExtension.lowercased() == "png" {
             let stem = url.deletingPathExtension().lastPathComponent
-            // Expected `mood_frame` — split on the LAST underscore so mood
-            // names with underscores (none today, but cheap to support) work.
-            guard let underscore = stem.lastIndex(of: "_"),
-                  let frameIdx = Int(stem[stem.index(after: underscore)...]),
-                  let mood = PetMood(rawValue: String(stem[stem.startIndex..<underscore]))
+            guard let lastUnderscore = stem.lastIndex(of: "_"),
+                  let frameIdx = Int(stem[stem.index(after: lastUnderscore)...])
             else { continue }
-            grouped[mood, default: []].append((frameIdx, url))
+            let prefix = String(stem[stem.startIndex..<lastUnderscore])
+
+            if prefix.hasPrefix("walk_") {
+                let dirName = String(prefix.dropFirst("walk_".count))
+                if let dir = WalkDirection(rawValue: dirName) {
+                    walkGrouped[dir, default: []].append((frameIdx, url))
+                }
+            } else if let mood = PetMood(rawValue: prefix) {
+                moodGrouped[mood, default: []].append((frameIdx, url))
+            }
         }
 
-        for (mood, list) in grouped {
+        var frames: [PetMood: [NSImage]] = [:]
+        for (mood, list) in moodGrouped {
             let sorted = list.sorted { $0.0 < $1.0 }
             frames[mood] = sorted.compactMap { entry in
                 NSImage(contentsOf: entry.1).map { upscalePixelArt($0, to: renderSize) }
             }
         }
+        var walkFrames: [WalkDirection: [NSImage]] = [:]
+        for (dir, list) in walkGrouped {
+            let sorted = list.sorted { $0.0 < $1.0 }
+            walkFrames[dir] = sorted.compactMap { entry in
+                NSImage(contentsOf: entry.1).map { upscalePixelArt($0, to: renderSize) }
+            }
+        }
 
-        return SpriteSet(name: setName, frames: frames)
+        return SpriteSet(name: setName, frames: frames, walkFrames: walkFrames)
     }
 
     /// Render the source image into a new NSImage at `size` using

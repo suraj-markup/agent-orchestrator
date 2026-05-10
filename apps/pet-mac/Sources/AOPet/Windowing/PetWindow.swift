@@ -31,4 +31,23 @@ final class PetWindow: NSWindow {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    /// Set true around code paths that move the window programmatically
+    /// (the wander controller and the bubble auto-grow resize). The
+    /// `windowDidMove` observer skips persistence while this is true,
+    /// so wander steps don't overwrite the user's parked position. The
+    /// flag's polarity matches the user-facing intent: programmatic
+    /// moves should not trigger a "user picked this spot" save.
+    var isProgrammaticMove: Bool = false
+
+    /// Run `body` with `isProgrammaticMove == true` so any
+    /// `setFrameOrigin` / `setFrame` inside is gated out of the
+    /// position-save path. Always restores the previous value, so
+    /// nested calls (e.g. wander resizing during bubble resize) work.
+    func performProgrammatically(_ body: () -> Void) {
+        let previous = isProgrammaticMove
+        isProgrammaticMove = true
+        body()
+        isProgrammaticMove = previous
+    }
 }
