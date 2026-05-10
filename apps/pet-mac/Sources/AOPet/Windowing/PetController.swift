@@ -33,6 +33,22 @@ final class PetController {
     /// is discoverable on the controller.
     private static let forceSleepIdleSeconds: TimeInterval = 300
 
+    /// Drives autonomous wandering — the pet picks a random direction,
+    /// walks for a few seconds, occasionally pauses. See WanderController.
+    private var wanderController: WanderController?
+    /// Set by the most recent wander `.move` tick; cleared on `.still`.
+    /// `renderFrame` uses this to decide between a walk frame and the
+    /// mood frame.
+    private var currentWalkDirection: WalkDirection?
+    /// Walk-frame counter — incremented every wander tick the pet is
+    /// moving. Divided by `walkFrameSubdivision` to slow the visible
+    /// cadence below the wander tick rate (20fps wander → ~7fps walk).
+    private var walkTick = 0
+    private static let walkFrameSubdivision = 3
+    /// After a user-driven move (= drag), suspend wander for this long
+    /// so the cat doesn't fight the user's cursor.
+    private static let userDragSuppressSeconds: TimeInterval = 1.0
+
     /// Called when the user picks "Switch sprite".
     var onSwitchSprite: (() -> Void)?
     /// Called when the user picks "Hide pet".
@@ -62,14 +78,18 @@ final class PetController {
         var frame = window.frame
         guard frame.size != size else { return }
         frame.size = size
-        window.setFrame(frame, display: true, animate: false)
+        window.performProgrammatically {
+            window.setFrame(frame, display: true, animate: false)
+        }
     }
 
     // MARK: - Lifecycle
 
     func show(at fallbackOrigin: NSPoint) {
         let origin = PositionStore.load(for: positionKey) ?? fallbackOrigin
-        window.setFrameOrigin(origin)
+        window.performProgrammatically {
+            window.setFrameOrigin(origin)
+        }
         window.orderFrontRegardless()
         NotificationCenter.default.addObserver(
             self,
@@ -77,6 +97,7 @@ final class PetController {
             name: NSWindow.didMoveNotification,
             object: window
         )
+        startWanderControllerIfNeeded()
     }
 
     func close() {
@@ -84,8 +105,22 @@ final class PetController {
         animationTimer = nil
         moodScheduler?.stop()
         moodScheduler = nil
+        wanderController?.stop()
+        wanderController = nil
         NotificationCenter.default.removeObserver(self)
         window.orderOut(nil)
+    }
+
+    private func startWanderControllerIfNeeded() {
+        guard wanderController == nil else { return }
+        let wander = WanderController { [weak self] action in
+            self?.applyWanderTick(action)
+        }
+        // Apply the current mood's gating so the pet doesn't immediately
+        // start walking if it spawned in `.alert` / `.sleeping`.
+        applyWanderGate(for: mood, on: wander)
+        wander.start()
+        wanderController = wander
     }
 
     private func startMoodScheduler() {
@@ -106,7 +141,67 @@ final class PetController {
     }
 
     @objc private func didMove() {
+        // Programmatic moves (wander steps, bubble auto-grow) must NOT
+        // overwrite the user's parked position. Only persist when the
+        // move came from outside our code paths — i.e. the user dragged.
+        guard !window.isProgrammaticMove else { return }
         PositionStore.save(window.frame.origin, for: positionKey)
+        // The user just grabbed the pet. Suppress wander so the cat
+        // doesn't immediately walk away from where they parked it.
+        wanderController?.suppressForSeconds(PetController.userDragSuppressSeconds)
+    }
+
+    /// Apply one tick from the wander controller. `.move` translates
+    /// the window (clamped to the current screen) and remembers the
+    /// direction so `renderFrame` shows the matching walk pose.
+    /// `.still` clears the direction so we fall back to the mood frame.
+    private func applyWanderTick(_ action: WanderController.TickAction) {
+        switch action {
+        case .move(let dx, let dy, let dir):
+            // Mood gates inside the wander controller already suppress
+            // ticks for `.alert`/`.sleeping`, but if the gate was just
+            // released and the mood hasn't transitioned yet, double-check.
+            guard !shouldSuppressMovementForMood(mood) else {
+                applyWanderTick(.still)
+                return
+            }
+            let current = window.frame.origin
+            // AppKit window origin is bottom-left; `dy` from the wander
+            // vector is positive-south, so subtract to move down on screen.
+            let proposed = NSPoint(x: current.x + dx, y: current.y - dy)
+            let clamped = WanderController.clampOrigin(
+                proposed,
+                size: window.frame.size,
+                screens: NSScreen.screens
+            )
+            window.performProgrammatically {
+                window.setFrameOrigin(clamped)
+            }
+            currentWalkDirection = dir
+            walkTick += 1
+            renderFrame()
+        case .still:
+            currentWalkDirection = nil
+            renderFrame()
+        }
+    }
+
+    /// Whether the wander loop should freeze for this mood. Sleeping
+    /// pets don't roam; alert pets stay put while the user reads the
+    /// bubble.
+    private func shouldSuppressMovementForMood(_ mood: PetMood) -> Bool {
+        switch mood {
+        case .sleeping, .alert: return true
+        default: return false
+        }
+    }
+
+    private func applyWanderGate(for mood: PetMood, on wander: WanderController) {
+        if shouldSuppressMovementForMood(mood) {
+            // Suppress for the full event-override window so an alert
+            // event doesn't immediately surrender to wander after 1s.
+            wander.suppressForSeconds(PetController.eventOverrideSeconds)
+        }
     }
 
     // MARK: - State updates
@@ -121,6 +216,12 @@ final class PetController {
         case .sad:   view.setOverlay(.exclaim)
         case .happy: view.setOverlay(.check)
         default:     view.setOverlay(nil)
+        }
+        // Sleeping/alert moods freeze the wander loop. Other moods let
+        // it run; the `.still` action will render the mood frame.
+        if let wander = wanderController, shouldSuppressMovementForMood(newMood) {
+            wander.suppressForSeconds(PetController.eventOverrideSeconds)
+            currentWalkDirection = nil
         }
         renderFrame()
         // Different moods animate at different cadences — re-arm the
@@ -274,6 +375,18 @@ final class PetController {
     }
 
     private func renderFrame() {
+        // While wandering with a known direction, prefer the walk frame.
+        // Falls through to the mood frame if the sprite set lacks walk
+        // assets (older sets pre-wander) or we're paused / suppressed.
+        if let dir = currentWalkDirection,
+           !shouldSuppressMovementForMood(mood),
+           let walkImage = spriteSet.image(
+                for: dir,
+                tick: walkTick / PetController.walkFrameSubdivision
+           ) {
+            view.setImage(walkImage)
+            return
+        }
         view.setImage(spriteSet.image(for: mood, tick: tick))
     }
 

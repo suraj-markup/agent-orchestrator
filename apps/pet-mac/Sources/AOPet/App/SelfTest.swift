@@ -368,6 +368,114 @@ enum SelfTest {
         assertEqual(s2, "oneko", "cycle: dog → oneko")
         assertEqual(testDefaults.string(forKey: "pet.spriteSet"), "oneko", "cycle: persisted")
 
+        // ── WalkDirection vectors ───────────────────────────────────────
+        // Cardinals length 1, diagonals normalized so cross-screen
+        // diagonal travel matches cardinal speed.
+        for dir in WalkDirection.allCases {
+            let v = dir.unitVector
+            let length = (v.dx * v.dx + v.dy * v.dy).squareRoot()
+            let delta = abs(length - 1.0)
+            assertTrue(delta < 0.0001,
+                       "WalkDirection.\(dir.rawValue) length ≈ 1 (got \(length))")
+        }
+        let east = WalkDirection.e.unitVector
+        assertTrue(east.dx > 0.99 && abs(east.dy) < 0.01, "east points right")
+        let north = WalkDirection.n.unitVector
+        assertTrue(abs(north.dx) < 0.01 && north.dy < -0.99, "north points up (negative dy)")
+
+        // ── WanderController state machine ──────────────────────────────
+        // Walking decrements; on expiry pickRoll < 0.30 → pause.
+        let walkExpiringToPause = WanderController.step(
+            state: .walking(direction: .e, ticksRemaining: 1),
+            intervalSeconds: 0.05,
+            speedPxPerSec: 30,
+            pickRoll:        { 0.0 },
+            pickDirection:   { .nw },
+            pickWalkDuration:  { 4 },
+            pickPauseDuration: { 2 }
+        )
+        assertEqual(walkExpiringToPause.action,
+                    .move(dx: 1.5, dy: 0, frameDir: .e),
+                    "wander: walking emits move with east vector")
+        assertEqual(walkExpiringToPause.next,
+                    .paused(ticksRemaining: 40),
+                    "wander: walk expiry + low roll → 2s pause (40 ticks)")
+
+        // pickRoll > 0.30 → new direction with fresh ticks.
+        let walkExpiringToWalk = WanderController.step(
+            state: .walking(direction: .e, ticksRemaining: 1),
+            intervalSeconds: 0.05,
+            speedPxPerSec: 30,
+            pickRoll:        { 0.99 },
+            pickDirection:   { .nw },
+            pickWalkDuration:  { 4 },
+            pickPauseDuration: { 2 }
+        )
+        assertEqual(walkExpiringToWalk.next,
+                    .walking(direction: .nw, ticksRemaining: 80),
+                    "wander: walk expiry + high roll → new direction (80 ticks for 4s)")
+
+        // Paused decrements then resumes walking.
+        let pausedDecrement = WanderController.step(
+            state: .paused(ticksRemaining: 2),
+            intervalSeconds: 0.05,
+            speedPxPerSec: 30,
+            pickRoll:        { 0.5 },
+            pickDirection:   { .s },
+            pickWalkDuration:  { 6 },
+            pickPauseDuration: { 1 }
+        )
+        assertEqual(pausedDecrement.action, .still, "wander: pause emits still")
+        assertEqual(pausedDecrement.next,
+                    .paused(ticksRemaining: 1),
+                    "wander: pause decrements")
+
+        let pausedExpiry = WanderController.step(
+            state: .paused(ticksRemaining: 1),
+            intervalSeconds: 0.05,
+            speedPxPerSec: 30,
+            pickRoll:        { 0.0 },
+            pickDirection:   { .s },
+            pickWalkDuration:  { 6 },
+            pickPauseDuration: { 1 }
+        )
+        assertEqual(pausedExpiry.next,
+                    .walking(direction: .s, ticksRemaining: 120),
+                    "wander: pause expiry → walks 6s south (120 ticks)")
+
+        // External suppression makes ticks emit `.still`.
+        var observed: [WanderController.TickAction] = []
+        let suppressed = WanderController(
+            intervalSeconds: 0.05,
+            speedPxPerSec: 30,
+            pickRoll: { 0.99 },
+            pickDirection: { .e },
+            pickWalkDuration: { 5 },
+            pickPauseDuration: { 1 },
+            onTick: { observed.append($0) }
+        )
+        suppressed.suppressForSeconds(60)
+        suppressed.fireTick()
+        suppressed.fireTick()
+        assertEqual(observed, [.still, .still],
+                    "wander: suppressed → fireTick emits still")
+        assertTrue(suppressed.isSuppressed, "wander: isSuppressed reflects soft pause")
+
+        // ── PetWindow programmatic-move flag ────────────────────────────
+        // Defaults false; performProgrammatically toggles + restores so
+        // the didMove gate persists user moves but skips wander steps.
+        let testWindow = PetWindow(size: NSSize(width: 240, height: 132))
+        assertTrue(!testWindow.isProgrammaticMove,
+                   "PetWindow.isProgrammaticMove defaults false")
+        var observedDuring = false
+        testWindow.performProgrammatically {
+            observedDuring = testWindow.isProgrammaticMove
+        }
+        assertTrue(observedDuring,
+                   "performProgrammatically: flag is true inside body")
+        assertTrue(!testWindow.isProgrammaticMove,
+                   "performProgrammatically: flag restored after body")
+
         if failures.isEmpty {
             print("AOPet self-test: all assertions passed")
             return 0
