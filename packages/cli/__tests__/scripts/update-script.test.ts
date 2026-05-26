@@ -296,14 +296,16 @@ exit 0`,
         encoding: "utf8",
       });
 
-      const repoRoot = resolve(packageRoot, "../..");
-      expect(result.status, result.stderr || result.stdout).toBe(0);
-      const commands = readFileSync(commandLog, "utf8");
-      rmSync(tempRoot, { recursive: true, force: true });
-
-      expect(commands).toContain(
-        `node ${join(repoRoot, "packages", "ao", "bin", "ao.js")} --version`,
-      );
+      try {
+        const repoRoot = resolve(packageRoot, "../..");
+        expect(result.status, result.stderr || result.stdout).toBe(0);
+        const commands = readFileSync(commandLog, "utf8");
+        expect(commands).toContain(
+          `node ${join(repoRoot, "packages", "ao", "bin", "ao.js")} --version`,
+        );
+      } finally {
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
     },
   );
 
